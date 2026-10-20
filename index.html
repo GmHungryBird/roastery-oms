@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hungry Bird Roastery — Order</title>
+<style>
+  :root {
+    --bg: #f6f1ea; --card: #ffffff; --ink: #2b1d14; --muted: #7a6a5d; --line: #e6dccf;
+    --brand: #4a2e1c; --accent: #b5652b; --ok: #2f7a4a; --err: #a33a2b; --warn: #9a6a12; --chip: #f1e8dd;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1b1410; --card: #251b15; --ink: #f1e7dc; --muted: #b3a294; --line: #3a2c22; --brand: #e3c3a3; --accent: #e08a4c; --ok: #6cc28c; --err: #ef8a7a; --warn: #e2b456; --chip: #33251c; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; padding-bottom: 96px; }
+  header { background: #4a2e1c; color: #fff; padding: 18px 16px 20px; }
+  @media (prefers-color-scheme: dark) { header { background: #3a2417; } }
+  header small { opacity: .75; letter-spacing: .04em; text-transform: uppercase; font-size: 11px; }
+  header h1 { margin: 2px 0 0; font-size: 20px; }
+  main { max-width: 640px; margin: 0 auto; padding: 16px; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 10px; }
+  .row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+  .row:first-of-type { border-top: 0; }
+  .name { font-weight: 600; }
+  .sub { color: var(--muted); font-size: 13px; }
+  .price { font-weight: 600; white-space: nowrap; }
+  .tag { display: inline-block; font-size: 11px; color: var(--accent); border: 1px solid currentColor; border-radius: 999px; padding: 0 7px; margin-left: 6px; vertical-align: 1px; }
+  .stepper { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+  .stepper button { width: 36px; height: 36px; border-radius: 10px; border: 1px solid var(--line); background: var(--chip); color: var(--ink); font-size: 18px; cursor: pointer; }
+  .stepper input { width: 46px; height: 36px; text-align: center; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--ink); font: inherit; font-weight: 600; }
+  .msg { padding: 28px 16px; text-align: center; color: var(--muted); }
+  .msg.err { color: var(--err); }
+  .note { font-size: 12px; color: var(--muted); text-align: center; margin: 18px 0 8px; }
+  .bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-top: 1px solid var(--line); padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); display: none; }
+  .bar.show { display: block; }
+  .bar .in { max-width: 640px; margin: 0 auto; display: flex; align-items: center; gap: 12px; }
+  .bar .sum { flex: 1; }
+  .btn { border: 0; border-radius: 10px; padding: 11px 18px; font: inherit; font-weight: 600; cursor: pointer; background: var(--accent); color: #fff; }
+  .btn.ghost { background: transparent; color: var(--err); border: 1px solid var(--line); padding: 7px 12px; font-size: 13px; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+  input[type=date], textarea { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--ink); font: inherit; }
+  textarea { min-height: 64px; resize: vertical; }
+  .lines .row { padding: 6px 0; border: 0; font-size: 14px; }
+  .total { display: flex; justify-content: space-between; font-weight: 700; border-top: 1px solid var(--line); padding-top: 10px; margin-top: 6px; }
+  .status { display: inline-block; font-size: 12px; font-weight: 600; border-radius: 999px; padding: 2px 9px; background: var(--chip); }
+  .st-MASUK { color: var(--warn); } .st-DIVALIDASI, .st-DIPROSES, .st-DIKIRIM, .st-SEBAGIAN { color: var(--accent); }
+  .st-SELESAI { color: var(--ok); } .st-BATAL { color: var(--muted); text-decoration: line-through; }
+  .order { border-top: 1px solid var(--line); padding: 12px 0; }
+  .order:first-of-type { border-top: 0; padding-top: 2px; }
+  .order .head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+  .alert { padding: 10px 12px; border-radius: 10px; margin-bottom: 14px; font-size: 14px; }
+  .alert.ok { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
+  .alert.err { background: color-mix(in srgb, var(--err) 14%, transparent); color: var(--err); }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <small id="usaha">Hungry Bird Coffee Roaster</small>
+  <h1 id="nama">Memuat…</h1>
+</header>
+<main id="main"><div class="msg">Memuat data…</div></main>
+<div class="bar" id="bar"><div class="in">
+  <div class="sum"><div class="sub" id="barCount"></div><div class="price" id="barTotal"></div></div>
+  <button class="btn" id="barBtn">Lanjut pesan</button>
+</div></div>
+
+<script>
+// Ganti dengan URL web app Apps Script OMS (Deploy → Web app → URL yang berakhiran /exec)
+const API = 'GANTI_DENGAN_URL_WEB_APP_OMS';
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const rp = n => 'Rp ' + Number(n || 0).toLocaleString('id-ID');
+const tgl = s => { const d = new Date(String(s).slice(0, 10) + 'T00:00:00+08:00'); return isNaN(d) ? s : d.toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }); };
+const token = new URLSearchParams(location.search).get('t');
+let data = null, cart = {}, ref = null, flash = null;
+
+async function api(body) {
+  try {
+    const r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) });
+    return await r.json();
+  } catch (e) {
+    const r = await fetch(API + '?q=' + encodeURIComponent(JSON.stringify(body)));
+    return await r.json();
+  }
+}
+
+function fail(msg) {
+  $('#nama').textContent = 'Tidak bisa dibuka';
+  $('#main').innerHTML = '<div class="msg err">' + esc(msg) + '</div>';
+  $('#bar').classList.remove('show');
+}
+
+async function load() {
+  if (!token) return fail('Link tidak lengkap. Gunakan link yang dikirim admin.');
+  let d;
+  try { d = await api({ action: 'customerInit', token }); }
+  catch (e) { return fail('Tidak bisa terhubung ke server. Periksa koneksi internet lalu muat ulang.'); }
+  if (!d.ok) return fail(d.error);
+  data = d;
+  if (d.usaha) $('#usaha').textContent = d.usaha;
+  $('#nama').textContent = d.customer.nama;
+  document.title = d.customer.nama + ' — ' + (d.usaha || 'Order');
+  renderHome();
+}
+
+function cartLines() {
+  return data.katalog.filter(p => cart[p.id] > 0).map(p => ({ p, qty: cart[p.id], sub: cart[p.id] * p.harga }));
+}
+
+function updateBar() {
+  const lines = cartLines();
+  const n = lines.reduce((s, l) => s + l.qty, 0);
+  $('#bar').classList.toggle('show', n > 0);
+  $('#barCount').textContent = n + ' item';
+  $('#barTotal').textContent = rp(lines.reduce((s, l) => s + l.sub, 0));
+}
+
+function setQty(id, q) {
+  q = Math.max(0, Math.min(999, Math.floor(Number(q) || 0)));
+  cart[id] = q;
+  const inp = document.querySelector('input[data-id="' + id + '"]');
+  if (inp && Number(inp.value) !== q) inp.value = q;
+  updateBar();
+}
+
+function orderCard(o) {
+  const items = o.items.map(i => `${i.qty} × ${esc(i.nama)}`).join('<br>');
+  return `<div class="order">
+    <div class="head"><div class="name">${esc(o.id)}</div><span class="status st-${esc(o.status)}">${esc(o.statusLabel)}</span></div>
+    <div class="sub">Dipesan ${esc(o.tglOrder)} · Kirim ${esc(tgl(o.tglKirim))}</div>
+    <div style="margin:6px 0">${items}</div>
+    ${o.catatan ? `<div class="sub">Catatan: ${esc(o.catatan)}</div>` : ''}
+    <div class="head" style="margin-top:6px"><div class="price">${rp(o.total)}</div>
+      ${o.status === 'MASUK' ? `<button class="btn ghost" data-cancel="${esc(o.id)}">Batalkan</button>` : ''}</div>
+  </div>`;
+}
+
+function renderHome() {
+  const k = data.katalog;
+  const katalog = k.length
+    ? k.map(p => `<div class="row"><div><div class="name">${esc(p.nama)}${p.hargaKhusus ? '<span class="tag">Harga khusus</span>' : ''}</div>
+        <div class="sub">${esc([p.origin, p.profil].filter(Boolean).join(' · '))}</div><div class="price">${rp(p.harga)}</div></div>
+        <div class="stepper"><button data-dec="${esc(p.id)}" aria-label="Kurangi">−</button>
+        <input inputmode="numeric" data-id="${esc(p.id)}" value="${cart[p.id] || 0}" aria-label="Jumlah ${esc(p.nama)}">
+        <button data-inc="${esc(p.id)}" aria-label="Tambah">+</button></div></div>`).join('')
+    : '<div class="sub">Katalog belum diatur. Hubungi admin.</div>';
+
+  const pesanan = data.pesanan.length ? data.pesanan.map(orderCard).join('') : '<div class="sub">Belum ada pesanan.</div>';
+
+  const kiriman = data.kiriman.length
+    ? data.kiriman.map(k => `<div class="row"><div><div class="name">${esc(tgl(k.tanggal))} · ${esc(k.jam)}</div>
+        <div class="sub">${esc(k.catatan || '—')}</div></div>
+        <div class="sub" style="text-align:right">Diterima<br>${esc(k.penerima || '—')}</div></div>`).join('')
+    : '<div class="sub">Belum ada kiriman tercatat.</div>';
+
+  $('#main').innerHTML = `
+    ${flash ? `<div class="alert ${flash.ok ? 'ok' : 'err'}">${esc(flash.text)}</div>` : ''}
+    <section><h2>Pesan kopi</h2>${katalog}</section>
+    <section><h2>Pesanan saya</h2>${pesanan}</section>
+    <section><h2>Kiriman terakhir</h2>${kiriman}</section>
+    <p class="note">Versi uji coba.</p>`;
+  flash = null;
+  $('#barBtn').textContent = 'Lanjut pesan';
+  $('#barBtn').onclick = renderCheckout;
+  updateBar();
+}
+
+function renderCheckout() {
+  const lines = cartLines();
+  if (!lines.length) return;
+  if (!ref) ref = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
+  const min = data.hariIni;
+  const besok = new Date(new Date(min + 'T12:00:00+08:00').getTime() + 864e5).toISOString().slice(0, 10);
+  $('#main').innerHTML = `
+    <section><h2>Ringkasan pesanan</h2>
+      <div class="lines">${lines.map(l => `<div class="row"><div>${l.qty} × ${esc(l.p.nama)}</div><div>${rp(l.sub)}</div></div>`).join('')}</div>
+      <div class="total"><span>Total</span><span>${rp(lines.reduce((s, l) => s + l.sub, 0))}</span></div>
+      <label for="tk">Tanggal kirim yang diminta</label><input type="date" id="tk" min="${min}" value="${besok}">
+      <label for="ct">Catatan (opsional)</label><textarea id="ct" maxlength="300" placeholder="Mis. kirim sebelum jam 10, titip ke bar"></textarea>
+      <p class="sub" style="margin:12px 0 0">Jumlah yang dikirim bisa menyesuaikan stok. Admin akan mengonfirmasi sebelum pengiriman.</p>
+    </section>
+    <button class="btn ghost" id="back" style="color:var(--ink)">← Ubah pesanan</button>`;
+  $('#back').onclick = renderHome;
+  $('#barBtn').textContent = 'Kirim pesanan';
+  $('#barBtn').onclick = submit;
+  window.scrollTo(0, 0);
+}
+
+async function submit() {
+  const btn = $('#barBtn');
+  btn.disabled = true; btn.textContent = 'Mengirim…';
+  const body = { action: 'placeOrder', token, ref, tglKirim: $('#tk').value, catatan: $('#ct').value,
+    items: cartLines().map(l => ({ productId: l.p.id, qty: l.qty })) };
+  let r;
+  try { r = await api(body); } catch (e) { r = { ok: false, error: 'Koneksi terputus. Tekan Kirim pesanan lagi; pesanan tidak akan tercatat dobel.' }; }
+  btn.disabled = false;
+  if (!r.ok) { btn.textContent = 'Kirim pesanan'; alertTop(r.error); return; }
+  cart = {}; ref = null;
+  flash = { ok: true, text: 'Pesanan ' + r.order.id + ' terkirim. Admin akan memvalidasi pesanan Anda.' };
+  await load();
+  window.scrollTo(0, 0);
+}
+
+function alertTop(text) {
+  const old = document.querySelector('.alert'); if (old) old.remove();
+  $('#main').insertAdjacentHTML('afterbegin', `<div class="alert err">${esc(text)}</div>`);
+  window.scrollTo(0, 0);
+}
+
+document.addEventListener('click', async e => {
+  const t = e.target;
+  if (t.dataset.inc) setQty(t.dataset.inc, (cart[t.dataset.inc] || 0) + 1);
+  if (t.dataset.dec) setQty(t.dataset.dec, (cart[t.dataset.dec] || 0) - 1);
+  if (t.dataset.cancel) {
+    if (t.dataset.confirm !== '1') { t.dataset.confirm = '1'; t.textContent = 'Yakin batalkan?'; return; }
+    t.disabled = true; t.textContent = 'Membatalkan…';
+    const r = await api({ action: 'customerCancel', token, orderId: t.dataset.cancel });
+    flash = r.ok ? { ok: true, text: 'Pesanan ' + t.dataset.cancel + ' dibatalkan.' } : { ok: false, text: r.error };
+    await load();
+  }
+});
+document.addEventListener('input', e => { if (e.target.dataset.id) setQty(e.target.dataset.id, e.target.value); });
+
+load();
+</script>
+</body>
+</html>
