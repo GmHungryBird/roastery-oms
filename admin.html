@@ -94,6 +94,13 @@
   .rute-h { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin: 14px 0 2px; font-weight: 700; }
   .rute-h .sub { font-weight: 400; }
   .warnbox { border-left: 3px solid var(--warn); padding: 8px 12px; background: var(--card); border-radius: 8px; margin-bottom: 12px; font-size: 13.5px; }
+  .ckrow { display: flex; align-items: center; gap: 12px; margin: 0; font-size: inherit; color: var(--ink); cursor: pointer; }
+  .ck { width: 20px; height: 20px; flex: none; accent-color: var(--accent); cursor: pointer; }
+  .row.picked { background: color-mix(in srgb, var(--ok) 10%, transparent); }
+  .card.picked { outline: 2px solid var(--ok); }
+  .bulkbar { position: sticky; bottom: 0; z-index: 5; display: flex; gap: 10px; align-items: center; justify-content: flex-end; flex-wrap: wrap; background: var(--bg); border-top: 1px solid var(--line); padding: 12px 0; margin-top: 12px; }
+  .bulkbar .sub { margin-right: auto; }
+  .pending { opacity: .55; pointer-events: none; }
   .label-sec { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 6px; }
 </style>
 </head>
@@ -113,11 +120,13 @@ const tgl = s => { const d = new Date(String(s).slice(0, 10) + 'T00:00:00+08:00'
 const FILTERS = [['MASUK', 'Pesanan masuk'], ['DIVALIDASI', 'Divalidasi'], ['BERJALAN', 'Diproses & dikirim'], ['SELESAI', 'Terkirim'], ['BATAL', 'Dibatalkan'], ['', 'Semua']];
 const BERJALAN = ['DIPROSES', 'DIKIRIM', 'SEBAGIAN'];
 const SHIP_FILTERS = [['AKTIF', 'Belum terkirim'], ['DIRENCANAKAN', 'Dijadwalkan'], ['SIAP_KIRIM', 'Siap dikirim'], ['DIKIRIM', 'Dalam perjalanan'], ['TERKIRIM', 'Terkirim'], ['BATAL', 'Dibatalkan']];
-const NEXT = { DIRENCANAKAN: ['SIAP_KIRIM', 'Siap dikirim'], SIAP_KIRIM: ['DIKIRIM', 'Sudah dibawa kurir'], DIKIRIM: ['TERKIRIM', 'Tandai terkirim (manual)'] };
+const NEXT = { DIRENCANAKAN: ['SIAP_KIRIM', 'Siap dikirim'], SIAP_KIRIM: ['DIKIRIM', 'Dibawa kurir (manual)'], DIKIRIM: ['TERKIRIM', 'Tandai terkirim (manual)'] };
 const store = { get(k) { try { return sessionStorage.getItem(k); } catch (e) { return null; } }, set(k, v) { try { sessionStorage.setItem(k, v); } catch (e) {} }, del(k) { try { sessionStorage.removeItem(k); } catch (e) {} } };
 
 let auth = null, all = [], filter = 'MASUK', q = '', flash = null, today = '', view = 'pesanan';
 let prodData = null, shipData = null, couriers = [], shipFilter = 'AKTIF', shipDate = '', shipForm = null, shipGroup = 'rute';
+let prodPick = new Set(), shipPick = new Set(), busy = false;
+const uid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
 const ruteLabel = r => r || 'Belum ada rute';
 const ruteTag = o => `<span class="rtag${o.rute ? '' : ' none'}">${esc(ruteLabel(o.rute))}</span>`;
 const isAdmin = () => auth && String(auth.peran || '').toLowerCase() === 'admin';
@@ -156,8 +165,9 @@ function renderLogin(err) {
 
 function logout() { auth = null; store.del('oms_admin'); renderLogin(); }
 
-async function load() {
+async function load(fresh) {
   if (!auth) return renderLogin();
+  fresh = fresh === true;
   if (!auth.peran) {
     const r = await api({ action: 'adminLogin', staffId: auth.staffId, pin: auth.pin });
     if (!r.ok) return logout();
@@ -170,15 +180,15 @@ async function load() {
   let r;
   if (view === 'produksi') {
     loading('Memuat daftar kerja…');
-    r = await api({ action: 'adminProduction', staffId: auth.staffId, pin: auth.pin });
+    r = await api({ action: 'adminProduction', staffId: auth.staffId, pin: auth.pin, fresh });
     if (r.ok) { prodData = r; today = r.hariIni; }
   } else if (view === 'pengiriman') {
     loading('Memuat pengiriman…');
-    r = await api({ action: 'adminShipments', staffId: auth.staffId, pin: auth.pin, status: shipFilter, tanggal: shipDate });
+    r = await api({ action: 'adminShipments', staffId: auth.staffId, pin: auth.pin, status: shipFilter, tanggal: shipDate, fresh });
     if (r.ok) { shipData = r.shipments; couriers = r.couriers; today = r.hariIni; }
   } else {
     if (!all.length) loading('Memuat pesanan…');
-    r = await api({ action: 'adminOrders', staffId: auth.staffId, pin: auth.pin });
+    r = await api({ action: 'adminOrders', staffId: auth.staffId, pin: auth.pin, fresh });
     if (r.ok) { all = r.orders; today = r.hariIni; }
   }
   if (!r.ok) { if (/PIN|Staff tidak/.test(r.error)) return logout(); $('#main').innerHTML = `<div class="msg err">${esc(r.error)}</div>`; return; }
@@ -215,7 +225,7 @@ function card(o) {
   if (canShip() && jalan && sisa > 0) actions += `<button class="btn" data-ship="${esc(o.id)}">+ Pengiriman</button>`;
   if (isAdmin() && o.status === 'DIVALIDASI') actions += `<button class="btn sec" data-edit="${esc(o.id)}">Ubah</button><button class="btn ghost" data-cancel="${esc(o.id)}">Batalkan</button>`;
   if (isAdmin() && BERJALAN.includes(o.status) && sisa > 0) actions += `<button class="btn ghost" data-close="${esc(o.id)}">Tutup sisa</button>`;
-  return `<div class="card order${soon ? ' soon' : ''}" id="o-${esc(o.id)}">
+  return `<div class="card order${soon ? ' soon' : ''}${o._pending ? ' pending' : ''}" id="o-${esc(o.id)}">
     <div class="head"><div class="name">${esc(o.customer)}</div><span class="status st-${esc(o.status)}">${esc(o.statusLabel)}</span></div>
     <div class="sub">${esc(o.id)} · ${esc(o.customerId)} · dipesan ${esc(o.tglOrder)}</div>
     <div style="margin:2px 0">${ruteTag(o)}</div>
@@ -253,7 +263,7 @@ function render() {
     ${list.length ? `<div class="grid">${list.map(card).join('')}</div>` : '<div class="msg">Tidak ada pesanan di sini.</div>'}`;
   flash = null;
   $('#q').oninput = e => { q = e.target.value; const pos = e.target.selectionStart; render(); const i = $('#q'); i.focus(); i.setSelectionRange(pos, pos); };
-  $('#reload').onclick = load;
+  $('#reload').onclick = () => load(true);
   if ($('#newOrder')) $('#newOrder').onclick = () => openForm(null);
 }
 
@@ -386,25 +396,49 @@ function renderProduksi() {
     const list = oids.map(id => ordersById[id]).filter(Boolean).sort((a, b) => a.ruteUrutan - b.ruteUrutan || a.customer.localeCompare(b.customer));
     let lastR = null;
     const ords = list.map(o => {
-      const head = o.rute !== lastR ? `<div class="rute-h">${ruteTag(o)}${o.saranKurir ? `<span class="sub">kurir ${esc(o.saranKurir)}</span>` : ''}${o.ruteHari ? `<span class="sub">· ${esc(o.ruteHari)}</span>` : ''}</div>` : '';
+      const grp = list.filter(x => x.rute === o.rute).map(x => x.id);
+      const head = o.rute !== lastR ? `<div class="rute-h"><input type="checkbox" class="ck" data-poall="${esc(grp.join(','))}" ${grp.every(id => prodPick.has(id)) ? 'checked' : ''} title="Pilih semua di rute ini">${ruteTag(o)}${o.ruteHari ? `<span class="sub">${esc(o.ruteHari)}</span>` : ''}</div>` : '';
       lastR = o.rute;
-      return head + `<div class="row"><div><div class="name">${esc(o.customer)}</div>
-        <div class="sub">${esc(o.id)} · ${o.items.filter(i => i.sisa > 0).map(i => i.sisa + '× ' + esc(i.nama)).join(', ')}</div></div>
-        <button class="btn" data-ship="${esc(o.id)}">+ Pengiriman</button></div>`;
+      const on = prodPick.has(o.id);
+      return head + `<div class="row${on ? ' picked' : ''}"><label class="ckrow"><input type="checkbox" class="ck" data-po="${esc(o.id)}" ${on ? 'checked' : ''}>
+        <div><div class="name">${esc(o.customer)}</div>
+        <div class="sub">${esc(o.id)} · ${o.items.filter(i => i.sisa > 0).map(i => i.sisa + '× ' + esc(i.nama)).join(', ')}</div></div></label>
+        <button class="btn sec" data-ship="${esc(o.id)}" title="Kirim sebagian / atur detail">Sebagian…</button></div>`;
     }).join('');
     return `<div class="day card">
       <h3>${esc(tgl(h.tanggal))}${h.tanggal === today ? ' <span class="status st-MASUK">hari ini</span>' : ''}${telat ? ' <span class="status" style="color:var(--err)">terlambat</span>' : ''}</h3>
       <table class="tbl"><tr><th>Produk & customer</th><th class="num">Qty</th></tr>${rows}</table>
-      <p class="group-h">Buat pengiriman per pesanan, per rute</p>${ords}</div>`;
+      <p class="group-h">Centang pesanan yang barangnya sudah siap, per rute</p>${ords}</div>`;
   }).join('');
   $('#main').innerHTML = `${flash ? `<div class="alert ${flash.ok ? 'ok' : 'bad'}">${esc(flash.text)}</div>` : ''}
     <div class="filters"><div class="sub grow">Qty yang <b>belum dijadwalkan kirim</b> dari pesanan yang sudah divalidasi, per tanggal kirim yang diminta.</div><button class="chip" id="reload">Muat ulang</button></div>
     ${d.customerTanpaRute && d.customerTanpaRute.length ? `<div class="warnbox"><b>Belum ada rute:</b> ${d.customerTanpaRute.map(esc).join(', ')}. Isi kolom <b>Area</b> customer ini di tab Customer sheet stamp.</div>` : ''}
     ${d.ruteBelumDiatur && d.ruteBelumDiatur.length ? `<div class="warnbox"><b>Rute belum diatur:</b> ${d.ruteBelumDiatur.map(esc).join(', ')}. Cek ejaannya, atau isi kurir/hari di tab <b>Rute</b> sheet OMS (rute baru masuk otomatis tiap jam).</div>` : ''}
-    ${days || '<div class="msg">Tidak ada pekerjaan. Semua pesanan yang divalidasi sudah dijadwalkan kirim.</div>'}`;
+    ${days || '<div class="msg">Tidak ada pekerjaan. Semua pesanan yang divalidasi sudah dijadwalkan kirim.</div>'}
+    ${days ? `<div class="bulkbar"><span class="sub">Barang yang dicentang langsung <b>Siap dikirim</b> (seluruh sisa). Kurir memilih sendiri saat memuat. Kirim sebagian: tombol <b>Sebagian…</b></span>
+      <button class="btn ok" id="bulkShip" ${prodPick.size && !busy ? '' : 'disabled'}>${busy ? 'Menyimpan…' : 'Siap kirim (' + prodPick.size + ')'}</button></div>` : ''}`;
   flash = null;
-  $('#reload').onclick = load;
+  if ($('#bulkShip')) $('#bulkShip').onclick = bulkShip;
+  $('#reload').onclick = () => load(true);
 }
+
+async function bulkShip() {
+  const ids = [...prodPick]; if (!ids.length || busy) return;
+  // Layar langsung berubah: pesanan yang dicentang hilang dari daftar kerja, server menyusul
+  const before = JSON.stringify(prodData);
+  prodData.hari.forEach(h => { h.produk.forEach(p => { p.rincian = p.rincian.filter(r => !ids.includes(r.orderId)); p.qty = p.rincian.reduce((a, r) => a + r.qty, 0); }); h.produk = h.produk.filter(p => p.rincian.length); });
+  prodData.hari = prodData.hari.filter(h => h.produk.length);
+  prodPick = new Set(); busy = true; keepScroll(renderProduksi);
+  let r;
+  try { r = await api({ action: 'adminBulkShip', staffId: auth.staffId, pin: auth.pin, ref: uid(), orderIds: ids }); }
+  catch (e) { r = { ok: false, error: 'Koneksi terputus. Coba lagi; tidak akan tercatat dobel.' }; }
+  busy = false;
+  if (!r.ok) { prodData = JSON.parse(before); ids.forEach(id => prodPick.add(id)); flash = { ok: false, text: r.error }; return keepScroll(renderProduksi); }
+  const bad = r.results.filter(x => !x.ok);
+  flash = { ok: !bad.length, text: r.berhasil + ' pesanan siap dikirim.' + (bad.length ? ' Gagal: ' + bad.map(x => x.orderId + ' (' + x.error + ')').join(', ') : ' Kurir bisa langsung memuatnya.') };
+  load();
+}
+const keepScroll = fn => { const y = window.scrollY; fn(); window.scrollTo(0, y); };
 
 /* ---------- Form pengiriman ---------- */
 async function openShipForm(orderId) {
@@ -425,17 +459,18 @@ function renderShipForm() {
   const o = shipForm.order;
   const items = o.items.filter(i => i.sisa > 0);
   const tgl0 = o.saranTgl || (o.tglKirim < today ? today : o.tglKirim);
-  const kur0 = shipForm.kurir !== undefined ? shipForm.kurir : (o.saranKurirId || '');
+  const kur0 = shipForm.kurir !== undefined ? shipForm.kurir : '';
   $('#main').innerHTML = `<div class="form"><div class="card">
     <h2>Pengiriman untuk ${esc(o.customer)}</h2>
     <p class="sub" style="margin:0 0 12px">${esc(o.id)} · diminta kirim ${esc(tgl(o.tglKirim))} · ${ruteTag(o)}</p>
-    ${o.rute && (o.saranKurir || o.ruteHari) ? `<p class="sub" style="margin:-4px 0 12px">Kurir dan tanggal diisi dari pengaturan rute${o.ruteHari ? ' (' + esc(o.ruteHari) + ')' : ''}. Boleh diganti.</p>` : ''}
+    ${o.rute && o.ruteHari ? `<p class="sub" style="margin:-4px 0 12px">Tanggal diisi dari hari rute (${esc(o.ruteHari)}). Boleh diganti.</p>` : ''}
     <p class="label-sec">Jumlah yang sanggup dikirim</p>
     ${items.map(i => `<div class="row"><div><div class="name">${esc(i.nama)}</div><div class="sub">dipesan ${i.qty} · sisa ${i.sisa}${i.terkirim ? ' · ' + i.terkirim + ' sudah terkirim' : ''}</div></div>
       <div class="stepper"><button data-sdec="${esc(i.itemId)}">−</button><input inputmode="numeric" data-sq="${esc(i.itemId)}" data-max="${i.sisa}" value="${shipForm.qty[i.itemId]}"><button data-sinc="${esc(i.itemId)}">+</button></div></div>`).join('')}
     <p class="sub" style="margin:8px 0 0">Kurang dari sisa = kirim sebagian. Sisanya tetap muncul di daftar kerja produksi.</p>
     <label for="stg">Tanggal kirim</label><input type="date" id="stg" value="${esc(tgl0)}">
-    <label for="skr">Kurir</label><select id="skr"><option value="">Belum ditentukan</option>${couriers.map(k => `<option value="${esc(k.id)}"${k.id === kur0 ? ' selected' : ''}>${esc(k.nama)}</option>`).join('')}</select>
+    <label class="check"><input type="checkbox" id="ssiap" checked><span>Langsung siap dikirim<br><span class="sub">Barang muncul di aplikasi kurir untuk dimuat. Hapus centang bila barang belum siap.</span></span></label>
+    <label for="skr">Kurir (opsional)</label><select id="skr"><option value="">Kurir memilih sendiri saat memuat</option>${couriers.map(k => `<option value="${esc(k.id)}"${k.id === kur0 ? ' selected' : ''}>${esc(k.nama)}</option>`).join('')}</select>
     <label for="sinv">No. invoice (boleh diisi nanti)</label><input id="sinv" placeholder="Mis. INV-2610-031">
     <label for="sct">Catatan</label><input id="sct" maxlength="300" placeholder="Opsional">
   </div>
@@ -465,10 +500,10 @@ async function saveShip() {
   let r;
   try {
     r = await api({ action: 'adminShipmentCreate', staffId: auth.staffId, pin: auth.pin, orderId: shipForm.order.id, ref: shipForm.ref, items,
-      tglRencana: $('#stg').value, kurirId: $('#skr').value, invoiceNo: $('#sinv').value, catatan: $('#sct').value });
+      tglRencana: $('#stg').value, kurirId: $('#skr').value, invoiceNo: $('#sinv').value, catatan: $('#sct').value, siap: $('#ssiap').checked });
   } catch (e) { r = { ok: false, error: 'Koneksi terputus. Coba simpan lagi; tidak akan tercatat dobel.' }; }
   if (!r.ok) { btn.disabled = false; btn.textContent = 'Buat pengiriman'; return showFormMsg(r.error); }
-  flash = { ok: true, text: r.shipment.id + ' dibuat untuk ' + shipForm.order.customer + ' (' + r.shipment.items.map(i => i.qty + '× ' + i.nama).join(', ') + ').' };
+  flash = { ok: true, text: r.shipment.id + ' dibuat untuk ' + shipForm.order.customer + ' (' + r.shipment.items.map(i => i.qty + '× ' + i.nama).join(', ') + '), ' + r.shipment.statusLabel.toLowerCase() + '.' };
   shipForm = null;
   await load();
   window.scrollTo(0, 0);
@@ -479,8 +514,9 @@ function shipCard(x) {
   const next = NEXT[x.status];
   const final = x.status === 'TERKIRIM' || x.status === 'BATAL';
   const kurirSel = `<select data-kurir="${esc(x.id)}"><option value="">Pilih kurir…</option>${couriers.map(k => `<option value="${esc(k.id)}"${k.id === x.kurirId ? ' selected' : ''}>${esc(k.nama)}</option>`).join('')}</select>`;
-  return `<div class="card order">
-    <div class="head"><div class="name">${esc(x.customer)}</div><span class="status st-${esc(x.status)}">${esc(x.statusLabel)}</span></div>
+  const on = shipPick.has(x.id);
+  return `<div class="card order${on ? ' picked' : ''}${x._pending ? ' pending' : ''}">
+    <div class="head"><label class="ckrow">${x.status === 'DIRENCANAKAN' ? `<input type="checkbox" class="ck" data-sp="${esc(x.id)}" ${on ? 'checked' : ''}>` : ''}<span class="name">${esc(x.customer)}</span></label><span class="status st-${esc(x.status)}">${esc(x.statusLabel)}</span></div>
     <div class="sub">${esc(x.id)} · ${esc(x.orderId)} · ${esc(tgl(x.tglRencana))}</div>
     <div style="margin:2px 0">${ruteTag(x)}${shipGroup === 'rute' && x.kurir ? ` <span class="sub">${esc(x.kurir)}</span>` : ''}</div>
     <div class="items">${x.items.map(i => `<div><span>${i.qty} × ${esc(i.nama)}</span></div>`).join('')}</div>
@@ -514,27 +550,59 @@ function renderPengiriman() {
     </div>
     <div class="filters"><span class="sub">Kelompokkan:</span><button class="chip${shipGroup === 'rute' ? ' on' : ''}" data-sg="rute">Per rute</button><button class="chip${shipGroup === 'kurir' ? ' on' : ''}" data-sg="kurir">Per kurir</button></div>
     ${keys.length ? keys.map(k => `<p class="group-h">${esc(k)} · ${groups[k].length} pengiriman</p><div class="grid">${groups[k].map(shipCard).join('')}</div>`).join('') : '<div class="msg">Tidak ada pengiriman di sini.</div>'}
-    <p class="sub" style="margin-top:18px">Setelah aplikasi kurir tersambung, status <b>Terkirim</b> otomatis terisi dari stamp kurir. Sampai saat itu, gunakan <b>Tandai terkirim (manual)</b>.</p>`;
+    ${shipData.some(x => x.status === 'DIRENCANAKAN') ? `<div class="bulkbar"><span class="sub">Centang pengiriman yang dijadwalkan, lalu tandai siap sekaligus.</span><button class="btn ok" id="bulkReady" ${shipPick.size && !busy ? '' : 'disabled'}>Siap dikirim (${shipPick.size})</button></div>` : ''}
+    <p class="sub" style="margin-top:18px"><b>Dalam perjalanan</b> terisi otomatis saat kurir memuat barang di aplikasi Delivery, dan <b>Terkirim</b> saat kurir men-stamp. Tombol manual hanya untuk cadangan.</p>`;
   flash = null;
-  $('#reload').onclick = load;
+  if ($('#bulkReady')) $('#bulkReady').onclick = bulkReady;
+  $('#reload').onclick = () => load(true);
   $('#sdate').onchange = e => { shipDate = e.target.value; load(); };
 }
 
+const SHIP_LABEL = { DIRENCANAKAN: 'Dijadwalkan', SIAP_KIRIM: 'Siap dikirim', DIKIRIM: 'Dalam perjalanan', TERKIRIM: 'Terkirim', BATAL: 'Dibatalkan' };
 async function shipUpdate(id, extra, okText) {
-  const r = await api(Object.assign({ action: 'adminShipmentUpdate', staffId: auth.staffId, pin: auth.pin, shipmentId: id }, extra));
+  // Layar langsung berubah; server menyusul
+  const x = shipData && shipData.find(y => y.id === id);
+  if (x) {
+    if (extra.status) { x.status = extra.status; x.statusLabel = SHIP_LABEL[extra.status] || extra.status; }
+    if (extra.kurirId !== undefined) { x.kurirId = extra.kurirId; const k = couriers.find(c => c.id === extra.kurirId); x.kurir = k ? k.nama : ''; }
+    if (extra.invoiceNo !== undefined) x.invoiceNo = extra.invoiceNo;
+    x._pending = true; keepScroll(renderPengiriman);
+  }
+  let r;
+  try { r = await api(Object.assign({ action: 'adminShipmentUpdate', staffId: auth.staffId, pin: auth.pin, shipmentId: id }, extra)); }
+  catch (e) { r = { ok: false, error: 'Koneksi terputus. Coba lagi.' }; }
+  if (r.ok && r.shipment && shipData) { const i = shipData.findIndex(y => y.id === id); if (i >= 0) shipData[i] = r.shipment; }
   flash = r.ok ? { ok: true, text: r.unchanged ? 'Tidak ada perubahan.' : okText.replace('{id}', id) } : { ok: false, text: r.error };
-  await load();
+  if (!r.ok) return load();
+  keepScroll(renderPengiriman);
+}
+
+async function bulkReady() {
+  const ids = [...shipPick]; if (!ids.length || busy) return;
+  shipData.forEach(x => { if (ids.includes(x.id)) { x.status = 'SIAP_KIRIM'; x.statusLabel = 'Siap dikirim'; x._pending = true; } });
+  shipPick = new Set(); busy = true; keepScroll(renderPengiriman);
+  let r;
+  try { r = await api({ action: 'adminShipmentBulk', staffId: auth.staffId, pin: auth.pin, shipmentIds: ids, status: 'SIAP_KIRIM' }); }
+  catch (e) { r = { ok: false, error: 'Koneksi terputus. Coba lagi.' }; }
+  busy = false;
+  const bad = r.ok ? r.results.filter(x => !x.ok) : [];
+  flash = r.ok ? { ok: !bad.length, text: r.berhasil + ' pengiriman siap dikirim.' + (bad.length ? ' Gagal: ' + bad.map(x => x.shipmentId + ' (' + x.error + ')').join(', ') : '') } : { ok: false, text: r.error };
+  load();
 }
 
 async function setStatus(id, status, alasan) {
-  const r = await api({ action: 'adminSetStatus', staffId: auth.staffId, pin: auth.pin, orderId: id, status, alasan });
+  const o = all.find(x => x.id === id);
+  if (o) { o.status = status; o.statusLabel = status === 'DIVALIDASI' ? 'Divalidasi' : 'Dibatalkan'; o._pending = true; keepScroll(render); }
+  let r;
+  try { r = await api({ action: 'adminSetStatus', staffId: auth.staffId, pin: auth.pin, orderId: id, status, alasan }); }
+  catch (e) { r = { ok: false, error: 'Koneksi terputus. Coba lagi.' }; }
   flash = r.ok ? { ok: true, text: id + (status === 'DIVALIDASI' ? ' divalidasi.' : ' dibatalkan.') } : { ok: false, text: r.error };
   await load();
 }
 
 document.addEventListener('click', e => {
   const t = e.target.closest('button') || e.target;
-  if (t.dataset.view) { view = t.dataset.view; form = null; shipForm = null; renderTabs(); $('#main').innerHTML = ''; load(); return; }
+  if (t.dataset.view) { view = t.dataset.view; form = null; shipForm = null; prodPick = new Set(); shipPick = new Set(); renderTabs(); $('#main').innerHTML = ''; load(); return; }
   if (shipForm) {
     if (t.dataset.sinc) setShipQty(t.dataset.sinc, (shipForm.qty[t.dataset.sinc] || 0) + 1);
     if (t.dataset.sdec) setShipQty(t.dataset.sdec, (shipForm.qty[t.dataset.sdec] || 0) - 1);
@@ -610,6 +678,10 @@ document.addEventListener('input', e => {
   if (shipForm && e.target.dataset.sq) setShipQty(e.target.dataset.sq, e.target.value);
 });
 document.addEventListener('change', e => {
+  const d = e.target.dataset;
+  if (d.po) { e.target.checked ? prodPick.add(d.po) : prodPick.delete(d.po); return keepScroll(renderProduksi); }
+  if (d.poall !== undefined) { d.poall.split(',').filter(Boolean).forEach(id => e.target.checked ? prodPick.add(id) : prodPick.delete(id)); return keepScroll(renderProduksi); }
+  if (d.sp) { e.target.checked ? shipPick.add(d.sp) : shipPick.delete(d.sp); return keepScroll(renderPengiriman); }
   if (e.target.dataset.kurir !== undefined) shipUpdate(e.target.dataset.kurir, { kurirId: e.target.value }, '{id}: kurir diperbarui.');
 });
 
