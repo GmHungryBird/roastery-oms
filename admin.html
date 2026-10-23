@@ -101,6 +101,9 @@
   .bulkbar { position: sticky; bottom: 0; z-index: 5; display: flex; gap: 10px; align-items: center; justify-content: flex-end; flex-wrap: wrap; background: var(--bg); border-top: 1px solid var(--line); padding: 12px 0; margin-top: 12px; }
   .bulkbar .sub { margin-right: auto; }
   .pending { opacity: .55; pointer-events: none; }
+  .date-h { margin: 26px 0 0; padding-top: 14px; border-top: 2px solid var(--line); font-size: 18px; }
+  .date-h:first-of-type { border-top: 0; padding-top: 0; }
+  .date-h.late { color: var(--err); }
   .label-sec { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 6px; }
 </style>
 </head>
@@ -533,23 +536,32 @@ function shipCard(x) {
 }
 
 function renderPengiriman() {
-  const groups = {}, order = {};
-  shipData.slice().sort((a, b) => a.ruteUrutan - b.ruteUrutan || a.customer.localeCompare(b.customer)).forEach(x => {
-    const k = shipGroup === 'rute' ? ruteLabel(x.rute) : (x.kurir || 'Belum ada kurir');
-    (groups[k] = groups[k] || []).push(x);
-    order[k] = shipGroup === 'rute' ? x.ruteUrutan : (x.kurir ? 1 : 0);
-  });
-  const keys = Object.keys(groups).sort((a, b) => order[a] - order[b] || a.localeCompare(b));
+  // Kelompok utama per tanggal kirim, lalu per rute / per kurir di dalamnya
+  const byDate = {};
+  shipData.forEach(x => { (byDate[x.tglRencana] = byDate[x.tglRencana] || []).push(x); });
+  const besok = new Date(new Date(today + 'T12:00:00+08:00').getTime() + 864e5).toISOString().slice(0, 10);
+  const dayLabel = d => tgl(d) + (d === today ? ' · hari ini' : d === besok ? ' · besok' : d < today ? ' · terlambat' : '');
+  const section = list => {
+    const groups = {}, order = {};
+    list.slice().sort((a, b) => a.ruteUrutan - b.ruteUrutan || a.customer.localeCompare(b.customer)).forEach(x => {
+      const k = shipGroup === 'rute' ? ruteLabel(x.rute) : (x.kurir || 'Belum ada kurir');
+      (groups[k] = groups[k] || []).push(x);
+      order[k] = shipGroup === 'rute' ? x.ruteUrutan : (x.kurir ? 1 : 0);
+    });
+    return Object.keys(groups).sort((a, b) => order[a] - order[b] || a.localeCompare(b))
+      .map(k => `<p class="group-h">${esc(k)} · ${groups[k].length} pengiriman</p><div class="grid">${groups[k].map(shipCard).join('')}</div>`).join('');
+  };
+  const dates = Object.keys(byDate).sort();
   $('#main').innerHTML = `${flash ? `<div class="alert ${flash.ok ? 'ok' : 'bad'}">${esc(flash.text)}</div>` : ''}
     <div class="filters">
       ${SHIP_FILTERS.map(([s, l]) => `<button class="chip${shipFilter === s ? ' on' : ''}" data-sf="${s}">${l}</button>`).join('')}
       <span class="grow"></span>
       <input type="date" id="sdate" value="${esc(shipDate)}" style="max-width:170px" title="Tanggal kirim">
-      <button class="chip" data-sday="${esc(today)}">Hari ini</button><button class="chip" data-sday="">Semua tanggal</button>
+      <button class="chip${shipDate === today ? ' on' : ''}" data-sday="${esc(today)}">Hari ini</button><button class="chip${shipDate === besok ? ' on' : ''}" data-sday="${esc(besok)}">Besok</button><button class="chip${!shipDate ? ' on' : ''}" data-sday="">Semua tanggal</button>
       <button class="chip" id="reload">Muat ulang</button>
     </div>
     <div class="filters"><span class="sub">Kelompokkan:</span><button class="chip${shipGroup === 'rute' ? ' on' : ''}" data-sg="rute">Per rute</button><button class="chip${shipGroup === 'kurir' ? ' on' : ''}" data-sg="kurir">Per kurir</button></div>
-    ${keys.length ? keys.map(k => `<p class="group-h">${esc(k)} · ${groups[k].length} pengiriman</p><div class="grid">${groups[k].map(shipCard).join('')}</div>`).join('') : '<div class="msg">Tidak ada pengiriman di sini.</div>'}
+    ${dates.length ? dates.map(d => `<h3 class="date-h${d < today ? ' late' : ''}">${esc(dayLabel(d))} <span class="sub">· ${byDate[d].length} pengiriman</span></h3>${section(byDate[d])}`).join('') : '<div class="msg">Tidak ada pengiriman di sini.</div>'}
     ${shipData.some(x => x.status === 'DIRENCANAKAN') ? `<div class="bulkbar"><span class="sub">Centang pengiriman yang dijadwalkan, lalu tandai siap sekaligus.</span><button class="btn ok" id="bulkReady" ${shipPick.size && !busy ? '' : 'disabled'}>Siap dikirim (${shipPick.size})</button></div>` : ''}
     <p class="sub" style="margin-top:18px"><b>Dalam perjalanan</b> terisi otomatis saat kurir memuat barang di aplikasi Delivery, dan <b>Terkirim</b> saat kurir men-stamp. Tombol manual hanya untuk cadangan.</p>`;
   flash = null;
