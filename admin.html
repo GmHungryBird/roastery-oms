@@ -71,6 +71,8 @@
   .hist { white-space: pre-line; font-size: 12px; color: var(--muted); margin-top: 6px; }
   nav#tabs { display: flex; gap: 4px; max-width: 980px; margin: 0 auto; padding: 12px 16px 0; overflow-x: auto; }
   nav#tabs:empty { display: none; }
+  nav#tabs .tab { white-space: nowrap; flex: none; }
+  @media (max-width: 480px) { nav#tabs .tab { padding: 8px 9px; font-size: 14px; } }
   .tab { border: 0; background: transparent; color: var(--muted); font: inherit; font-weight: 600; padding: 8px 14px; border-radius: 10px 10px 0 0; cursor: pointer; border-bottom: 2px solid transparent; }
   .tab.on { color: var(--ink); border-bottom-color: var(--accent); }
   .ships { margin-top: 8px; border-top: 1px dashed var(--line); padding-top: 6px; }
@@ -105,6 +107,23 @@
   .date-h:first-of-type { border-top: 0; padding-top: 0; }
   .date-h.late { color: var(--err); }
   .label-sec { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 6px; }
+  .lotline { font-size: 13px; color: var(--muted); margin: 2px 0 4px 14px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .lotline select { font-size: 13px; padding: 3px 6px; max-width: 220px; }
+  .lotcode { font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 600; color: var(--ink); }
+  .lotnone { color: var(--warn); font-weight: 600; }
+  .bigcode { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 34px; font-weight: 700; letter-spacing: .02em; margin: 6px 0; word-break: break-all; }
+  .rep { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .rep th, .rep td { border: 1px solid var(--line); padding: 5px 6px; text-align: left; vertical-align: top; }
+  .rep th { background: var(--card, #fff); font-weight: 600; }
+  .rep td.num, .rep th.num { text-align: right; }
+  .tblwrap { overflow-x: auto; }
+  .printonly { display: none; }
+  @media print {
+    header, nav, .filters, .noprint, .alert { display: none !important; }
+    .printonly { display: block; }
+    body { background: #fff; }
+    .rep { font-size: 10px; }
+  }
 </style>
 </head>
 <body>
@@ -129,6 +148,7 @@ const store = { get(k) { try { return sessionStorage.getItem(k); } catch (e) { r
 let auth = null, all = [], filter = 'MASUK', q = '', flash = null, today = '', view = 'pesanan';
 let prodData = null, shipData = null, couriers = [], shipFilter = 'AKTIF', shipDate = '', shipForm = null, shipGroup = 'rute';
 let prodPick = new Set(), shipPick = new Set(), busy = false;
+let lotData = null, lotForm = null, lotDone = null, repJenis = 'form17', repBulan = '', repData = null;
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
 const ruteLabel = r => r || 'Belum ada rute';
 const ruteTag = o => `<span class="rtag${o.rute ? '' : ' none'}">${esc(ruteLabel(o.rute))}</span>`;
@@ -187,8 +207,21 @@ async function load(fresh) {
     if (r.ok) { prodData = r; today = r.hariIni; }
   } else if (view === 'pengiriman') {
     loading('Memuat pengiriman…');
-    r = await api({ action: 'adminShipments', staffId: auth.staffId, pin: auth.pin, status: shipFilter, tanggal: shipDate, fresh });
+    const [a, l] = await Promise.all([
+      api({ action: 'adminShipments', staffId: auth.staffId, pin: auth.pin, status: shipFilter, tanggal: shipDate, fresh }),
+      api({ action: 'adminLots', staffId: auth.staffId, pin: auth.pin })]);
+    r = a;
     if (r.ok) { shipData = r.shipments; couriers = r.couriers; today = r.hariIni; }
+    if (l.ok) lotData = l;
+  } else if (view === 'kode') {
+    loading('Memuat stok kode produksi…');
+    r = await api({ action: 'adminLots', staffId: auth.staffId, pin: auth.pin });
+    if (r.ok) { lotData = r; today = r.hariIni; }
+  } else if (view === 'laporan') {
+    loading('Menyusun laporan…');
+    if (!repBulan) repBulan = new Date(Date.now() + 8 * 36e5).toISOString().slice(0, 7);
+    r = await api({ action: 'adminReport', staffId: auth.staffId, pin: auth.pin, jenis: repJenis, bulan: repBulan, fresh });
+    if (r.ok) repData = r;
   } else {
     if (!all.length) loading('Memuat pesanan…');
     r = await api({ action: 'adminOrders', staffId: auth.staffId, pin: auth.pin, fresh });
@@ -199,7 +232,7 @@ async function load(fresh) {
 }
 
 function renderTabs() {
-  const tabs = [['pesanan', 'Pesanan']].concat(canShip() ? [['produksi', 'Produksi'], ['pengiriman', 'Pengiriman']] : []);
+  const tabs = [['pesanan', 'Pesanan']].concat(canShip() ? [['produksi', 'Produksi'], ['kode', 'Kode'], ['pengiriman', 'Pengiriman'], ['laporan', 'Laporan']] : []);
   $('#tabs').innerHTML = tabs.map(([v, l]) => `<button class="tab${view === v ? ' on' : ''}" data-view="${v}">${l}</button>`).join('');
 }
 
@@ -249,6 +282,8 @@ function card(o) {
 function render() {
   if (view === 'produksi') return renderProduksi();
   if (view === 'pengiriman') return renderPengiriman();
+  if (view === 'kode') return renderKode();
+  if (view === 'laporan') return renderLaporan();
   const match = (o, s) => !s || (s === 'BERJALAN' ? BERJALAN.includes(o.status) : o.status === s);
   const count = s => all.filter(o => match(o, s)).length;
   const ql = q.toLowerCase();
@@ -394,7 +429,7 @@ function renderProduksi() {
   d.orders.forEach(o => { ordersById[o.id] = o; });
   const days = d.hari.map(h => {
     const telat = h.tanggal < today;
-    const rows = h.produk.map(p => `<tr><td><b>${esc(p.nama)}</b><div class="who-list">${p.rincian.map(r => `${esc(r.customer)} ${r.qty}`).join(' · ')}</div></td><td class="num">${p.qty}</td></tr>`).join('');
+    const rows = h.produk.map(p => `<tr><td><b>${esc(p.nama)}</b><div class="who-list">${p.rincian.map(r => `${esc(r.customer)} ${r.qty}`).join(' · ')}</div></td><td class="num">${p.qty}</td><td class="num" style="color:${(p.stok || 0) >= p.qty ? 'var(--ok)' : 'var(--warn)'}">${p.stok || 0}</td></tr>`).join('');
     const oids = [...new Set(h.produk.flatMap(p => p.rincian.map(r => r.orderId)))];
     const list = oids.map(id => ordersById[id]).filter(Boolean).sort((a, b) => a.ruteUrutan - b.ruteUrutan || a.customer.localeCompare(b.customer));
     let lastR = null;
@@ -410,7 +445,7 @@ function renderProduksi() {
     }).join('');
     return `<div class="day card">
       <h3>${esc(tgl(h.tanggal))}${h.tanggal === today ? ' <span class="status st-MASUK">hari ini</span>' : ''}${telat ? ' <span class="status" style="color:var(--err)">terlambat</span>' : ''}</h3>
-      <table class="tbl"><tr><th>Produk & customer</th><th class="num">Qty</th></tr>${rows}</table>
+      <table class="tbl"><tr><th>Produk & customer</th><th class="num">Qty</th><th class="num" title="Stok dari kode produksi yang sudah dikemas">Stok</th></tr>${rows}</table>
       <p class="group-h">Centang pesanan yang barangnya sudah siap, per rute</p>${ords}</div>`;
   }).join('');
   $('#main').innerHTML = `${flash ? `<div class="alert ${flash.ok ? 'ok' : 'bad'}">${esc(flash.text)}</div>` : ''}
@@ -522,7 +557,7 @@ function shipCard(x) {
     <div class="head"><label class="ckrow">${x.status === 'DIRENCANAKAN' ? `<input type="checkbox" class="ck" data-sp="${esc(x.id)}" ${on ? 'checked' : ''}>` : ''}<span class="name">${esc(x.customer)}</span></label><span class="status st-${esc(x.status)}">${esc(x.statusLabel)}</span></div>
     <div class="sub">${esc(x.id)} · ${esc(x.orderId)} · ${esc(tgl(x.tglRencana))}</div>
     <div style="margin:2px 0">${ruteTag(x)}${shipGroup === 'rute' && x.kurir ? ` <span class="sub">${esc(x.kurir)}</span>` : ''}</div>
-    <div class="items">${x.items.map(i => `<div><span>${i.qty} × ${esc(i.nama)}</span></div>`).join('')}</div>
+    <div class="items">${x.items.map(i => `<div><span>${i.qty} × ${esc(i.nama)}</span></div>${lotLine(x, i)}`).join('')}</div>
     <div class="total"><span>Total</span><span>${rp(x.total)}</span></div>
     ${x.status === 'TERKIRIM' ? `<div class="sub" style="margin-top:6px">Terkirim ${esc(x.waktuTerkirim)}${x.penerima ? ' · diterima ' + esc(x.penerima) : ''}<br>${esc(x.sumber)}</div>` : ''}
     ${x.catatan ? `<div class="sub">Catatan: ${esc(x.catatan)}</div>` : ''}
@@ -533,6 +568,131 @@ function shipCard(x) {
       ${next ? `<button class="btn${next[0] === 'TERKIRIM' ? ' sec' : ' ok'}" data-next="${esc(x.id)}" data-to="${next[0]}">${next[1]}</button>` : ''}
       ${!final ? `<button class="btn ghost" data-scancel="${esc(x.id)}">Batalkan</button>` : ''}
     </div></div>`;
+}
+
+function lotLine(x, i) {
+  const lots = i.lots || [];
+  if (!lots.length) return '';
+  const editable = lots.length === 1 && x.status !== 'BATAL' && x.status !== 'TERKIRIM' && !x._pending;
+  if (editable) {
+    const cur = lots[0].lot;
+    const opts = ((lotData && lotData.lots) || []).filter(l => l.productId === i.productId && l.lot !== cur && l.sisa >= i.qty);
+    return `<div class="lotline">Kode: <select data-setlot="${esc(x.id)}" data-item="${esc(i.itemId)}">
+      <option value="${esc(cur)}">${cur ? esc(cur) : '⚠ belum ada kode'}</option>
+      ${opts.map(l => `<option value="${esc(l.lot)}">${esc(l.lot)} (stok ${l.sisa}, exp ${esc(l.exp)})</option>`).join('')}
+      ${cur ? '<option value="">(kosongkan)</option>' : ''}</select></div>`;
+  }
+  return `<div class="lotline">Kode: ${lots.map(l => l.lot ? `<span class="lotcode">${esc(l.lot)}</span>${lots.length > 1 ? ' ×' + l.qty : ''}` : `<span class="lotnone">belum ada kode${lots.length > 1 ? ' ×' + l.qty : ''}</span>`).join(' · ')}</div>`;
+}
+
+async function setLot(shipId, itemId, lotId, sel) {
+  sel.disabled = true;
+  let r;
+  try { r = await api({ action: 'adminSetLot', staffId: auth.staffId, pin: auth.pin, shipmentId: shipId, itemId, lotId }); }
+  catch (e) { r = { ok: false, error: 'Koneksi terputus. Coba lagi.' }; }
+  if (r.ok && r.shipment) { const k = shipData.findIndex(y => y.id === shipId); if (k >= 0) shipData[k] = r.shipment; }
+  flash = r.ok ? { ok: true, text: shipId + ': kode produksi ' + (lotId || 'dikosongkan') + '.' } : { ok: false, text: r.error };
+  const l = await api({ action: 'adminLots', staffId: auth.staffId, pin: auth.pin });
+  if (l.ok) lotData = l;
+  keepScroll(renderPengiriman);
+}
+
+/* ---------- Kode produksi (FORM-16) ---------- */
+function renderKode() {
+  const d = lotData;
+  if (!lotForm) lotForm = { ref: uid(), productId: '', tglKemas: d.hariIni, tglRoast: '', qty: '', catatan: '' };
+  const f = lotForm;
+  const p = d.produk.find(x => x.id === f.productId);
+  const preview = p && f.tglKemas ? `${p.kode}-${f.tglKemas.slice(2).replace(/-/g, '')}-…` : '';
+  const stokPer = {};
+  d.lots.forEach(l => { (stokPer[l.nama] = stokPer[l.nama] || []).push(l); });
+  const stokHtml = Object.keys(stokPer).sort().map(n => {
+    const ls = stokPer[n], tot = ls.reduce((a, l) => a + l.sisa, 0);
+    return `<tr><td><b>${esc(n)}</b></td><td class="num"><b>${tot}</b></td><td>${ls.slice().sort((a, b) => a.tglKemas.localeCompare(b.tglKemas)).map(l =>
+      `<div><span class="lotcode">${esc(l.lot)}</span> · sisa ${l.sisa} dari ${l.qty} · exp ${esc(l.exp)}${l.exp && l.exp <= d.hariIni ? ' <span class="lotnone">kedaluwarsa</span>' : ''}</div>`).join('')}</td></tr>`;
+  }).join('');
+  $('#main').innerHTML = `${flash ? `<div class="alert ${flash.ok ? 'ok' : 'bad'}">${esc(flash.text)}</div>` : ''}
+    ${lotDone ? `<div class="card" style="border:2px solid var(--ok);margin-bottom:16px">
+      <div class="sub">Kode produksi untuk label · ${esc(lotDone.nama)} · ${lotDone.qty}</div>
+      <div class="bigcode">${esc(lotDone.lot)}</div>
+      <div><b>EXP ${esc(lotDone.exp)}</b></div>
+      ${lotDone.terisi ? `<div class="sub" style="margin-top:6px">${lotDone.terisi} pengiriman yang belum berkode langsung memakai kode ini.</div>` : ''}
+    </div>` : ''}
+    <div class="form"><div class="card">
+      <h2>Catat hasil kemas</h2>
+      <p class="sub" style="margin:0 0 10px">Satu catatan = satu kode produksi (FORM-16). Kode dan tanggal kedaluwarsa (+${d.masaSimpan} bulan) dibuat otomatis.</p>
+      <label for="lp">Produk</label><select id="lp"><option value="">Pilih produk…</option>${d.produk.map(x => `<option value="${esc(x.id)}"${x.id === f.productId ? ' selected' : ''}>${esc(x.nama)}</option>`).join('')}</select>
+      <label for="lk">Tanggal kemas</label><input type="date" id="lk" value="${esc(f.tglKemas)}" max="${esc(d.hariIni)}">
+      <label for="lr">Tanggal roasting (kosong = sama dengan kemas)</label><input type="date" id="lr" value="${esc(f.tglRoast)}" max="${esc(d.hariIni)}">
+      <label for="lq">Jumlah dikemas${p ? ' (' + p.satuan + ')' : ''}</label><input id="lq" inputmode="decimal" value="${esc(f.qty)}" placeholder="${p && p.satuan === 'pcs' ? 'mis. 40' : 'mis. 25'}">
+      <label for="lc">Catatan</label><input id="lc" maxlength="200" value="${esc(f.catatan)}" placeholder="Opsional, mis. batch roast 1–3">
+      ${preview ? `<p class="sub" style="margin:10px 0 0">Kode yang akan dibuat: <span class="lotcode">${esc(preview)}</span></p>` : ''}
+    </div>
+    <div class="savebar"><span class="sub">Satuan sama dengan satuan pesanan (kg untuk 1 kg, pcs untuk kemasan kecil).</span><button class="btn" id="saveLot" ${busy ? 'disabled' : ''}>${busy ? 'Menyimpan…' : 'Simpan & buat kode'}</button></div></div>
+    <h3 style="margin-top:26px">Stok per kode produksi</h3>
+    <p class="sub">Stok berkurang otomatis saat pengiriman dibuat (kode tertua dipakai dulu) dan kembali bila pengiriman dibatalkan.</p>
+    ${stokHtml ? `<div class="tblwrap"><table class="rep"><tr><th>Produk</th><th class="num">Stok</th><th>Kode</th></tr>${stokHtml}</table></div>` : '<div class="msg">Belum ada stok. Catat hasil kemas di atas.</div>'}
+    <div class="filters" style="margin-top:12px"><button class="chip" id="reload">Muat ulang</button></div>`;
+  flash = null;
+  const keep = () => { f.productId = $('#lp').value; f.tglKemas = $('#lk').value; f.tglRoast = $('#lr').value; f.qty = $('#lq').value; f.catatan = $('#lc').value; };
+  ['#lp', '#lk'].forEach(sel => { $(sel).onchange = () => { keep(); keepScroll(renderKode); }; });
+  ['#lr', '#lq', '#lc'].forEach(sel => { $(sel).oninput = keep; });
+  $('#saveLot').onclick = saveLot;
+  $('#reload').onclick = () => load(true);
+}
+
+async function saveLot() {
+  const f = lotForm;
+  f.productId = $('#lp').value; f.tglKemas = $('#lk').value; f.tglRoast = $('#lr').value; f.qty = $('#lq').value.trim(); f.catatan = $('#lc').value;
+  if (!f.productId) { flash = { ok: false, text: 'Pilih produk.' }; return renderKode(); }
+  if (!(Number(f.qty.replace(',', '.')) > 0)) { flash = { ok: false, text: 'Isi jumlah yang dikemas.' }; return renderKode(); }
+  busy = true; renderKode();
+  let r;
+  try { r = await api({ action: 'adminLotCreate', staffId: auth.staffId, pin: auth.pin, ref: f.ref, productId: f.productId, tglKemas: f.tglKemas, tglRoast: f.tglRoast, qty: f.qty, catatan: f.catatan }); }
+  catch (e) { r = { ok: false, error: 'Koneksi terputus. Coba simpan lagi; tidak akan tercatat dobel.' }; }
+  busy = false;
+  if (!r.ok) { flash = { ok: false, text: r.error }; return renderKode(); }
+  lotDone = r.duplicate ? { lot: r.lot, exp: '', nama: '', qty: '' } : r;
+  lotForm = { ref: uid(), productId: f.productId, tglKemas: f.tglKemas, tglRoast: '', qty: '', catatan: '' };
+  await load();
+  window.scrollTo(0, 0);
+}
+
+/* ---------- Laporan BPOM ---------- */
+const REP_COLS = {
+  form17: [['no', 'No'], ['produk', 'Nama Produk'], ['tglKeluar', 'Tanggal Keluar'], ['exp', 'Tanggal Kedaluwarsa'], ['kode', 'Kode Produksi'], ['diGudang', 'Jumlah Produk di Gudang', 1], ['keluar', 'Jumlah Produk Keluar Gudang', 1], ['sisa', 'Sisa Produk di Gudang', 1], ['satuan', 'Satuan'], ['tujuan', 'Tujuan Distributor'], ['suratJalan', 'No Surat Jalan'], ['paraf', 'Paraf']],
+  form16: [['no', 'No'], ['tglProduksi', 'Tanggal Produksi'], ['produk', 'Nama Produk'], ['jumlah', 'Jumlah Terkemas', 1], ['satuan', 'Satuan'], ['kode', 'Kode Produksi'], ['exp', 'Tanggal Kedaluwarsa'], ['masukGudang', 'Jumlah Masuk Gudang', 1], ['paraf', 'Paraf']]
+};
+const REP_TITLE = { form17: 'PKC-FORM-17 · Formulir Pengeluaran / Distribusi Produk Jadi', form16: 'PKC-FORM-16 · Formulir Pengemasan & Penyimpanan Produk Jadi' };
+
+function renderLaporan() {
+  const d = repData, cols = REP_COLS[repJenis];
+  const bulanLabel = new Date(repBulan + '-01T12:00:00+08:00').toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+  $('#main').innerHTML = `${flash ? `<div class="alert ${flash.ok ? 'ok' : 'bad'}">${esc(flash.text)}</div>` : ''}
+    <div class="filters">
+      <button class="chip${repJenis === 'form17' ? ' on' : ''}" data-rj="form17">FORM-17 Pengeluaran</button>
+      <button class="chip${repJenis === 'form16' ? ' on' : ''}" data-rj="form16">FORM-16 Pengemasan</button>
+      <span class="grow"></span>
+      <input type="month" id="rbulan" value="${esc(repBulan)}" style="max-width:170px">
+      <button class="chip" id="csv">Unduh CSV</button><button class="chip" id="cetak">Cetak</button><button class="chip" id="reload">Muat ulang</button>
+    </div>
+    <h3>${esc(REP_TITLE[repJenis])}</h3>
+    <p class="sub">${esc(bulanLabel)} · ${d.rows.length} baris${repJenis === 'form17' ? ' · barang yang sudah keluar gudang (Dalam perjalanan / Terkirim). No. surat jalan = ID pengiriman, paraf = kurir.' : ' · dari catatan hasil kemas.'}</p>
+    ${d.tanpaKode ? `<div class="warnbox noprint"><b>${d.tanpaKode} baris belum ada kode produksi.</b> Catat hasil kemas untuk produk itu di tab Kode produksi, lalu pilih kodenya di kartu pengiriman.</div>` : ''}
+    ${d.rows.length ? `<div class="tblwrap"><table class="rep"><tr>${cols.map(c => `<th${c[2] ? ' class="num"' : ''}>${esc(c[1])}</th>`).join('')}</tr>
+      ${d.rows.map(r => `<tr>${cols.map(c => `<td${c[2] ? ' class="num"' : ''}>${c[0] === 'kode' && !String(r.kode).match(/^[A-Z0-9]/) ? `<span class="lotnone">${esc(r.kode)}</span>` : esc(r[c[0]] ?? '')}</td>`).join('')}</tr>`).join('')}</table></div>` : '<div class="msg">Belum ada data di bulan ini.</div>'}`;
+  flash = null;
+  $('#rbulan').onchange = e => { if (e.target.value) { repBulan = e.target.value; load(); } };
+  $('#reload').onclick = () => load(true);
+  $('#cetak').onclick = () => window.print();
+  $('#csv').onclick = () => {
+    const q = v => { const t = String(v ?? ''); return /[",\n;]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+    const txt = [cols.map(c => q(c[1])).join(',')].concat(d.rows.map(r => cols.map(c => q(r[c[0]])).join(','))).join('\r\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['\ufeff' + txt], { type: 'text/csv;charset=utf-8' }));
+    a.download = (repJenis === 'form17' ? 'PKC-FORM-17_' : 'PKC-FORM-16_') + repBulan + '.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+  };
 }
 
 function renderPengiriman() {
@@ -614,7 +774,7 @@ async function setStatus(id, status, alasan) {
 
 document.addEventListener('click', e => {
   const t = e.target.closest('button') || e.target;
-  if (t.dataset.view) { view = t.dataset.view; form = null; shipForm = null; prodPick = new Set(); shipPick = new Set(); renderTabs(); $('#main').innerHTML = ''; load(); return; }
+  if (t.dataset.view) { view = t.dataset.view; form = null; shipForm = null; lotDone = null; prodPick = new Set(); shipPick = new Set(); renderTabs(); $('#main').innerHTML = ''; load(); return; }
   if (shipForm) {
     if (t.dataset.sinc) setShipQty(t.dataset.sinc, (shipForm.qty[t.dataset.sinc] || 0) + 1);
     if (t.dataset.sdec) setShipQty(t.dataset.sdec, (shipForm.qty[t.dataset.sdec] || 0) - 1);
@@ -629,6 +789,7 @@ document.addEventListener('click', e => {
   if (t.dataset.edit) openForm(t.dataset.edit);
   if (t.dataset.ship) openShipForm(t.dataset.ship);
   if (t.dataset.sf) { shipFilter = t.dataset.sf; load(); }
+  if (t.dataset.rj) { repJenis = t.dataset.rj; load(); }
   if (t.dataset.sg) { shipGroup = t.dataset.sg; render(); }
   if (t.dataset.sday !== undefined) { shipDate = t.dataset.sday; load(); }
   if (t.dataset.next) {
@@ -694,6 +855,7 @@ document.addEventListener('change', e => {
   if (d.po) { e.target.checked ? prodPick.add(d.po) : prodPick.delete(d.po); return keepScroll(renderProduksi); }
   if (d.poall !== undefined) { d.poall.split(',').filter(Boolean).forEach(id => e.target.checked ? prodPick.add(id) : prodPick.delete(id)); return keepScroll(renderProduksi); }
   if (d.sp) { e.target.checked ? shipPick.add(d.sp) : shipPick.delete(d.sp); return keepScroll(renderPengiriman); }
+  if (d.setlot) return setLot(d.setlot, d.item, e.target.value, e.target);
   if (e.target.dataset.kurir !== undefined) shipUpdate(e.target.dataset.kurir, { kurirId: e.target.value }, '{id}: kurir diperbarui.');
 });
 
