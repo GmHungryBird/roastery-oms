@@ -611,9 +611,10 @@ function shipCard(x) {
 }
 
 function lotLine(x, i) {
-  const lots = i.lots || [];
+  const lots = [];
+  (i.lots || []).forEach(l => { const x = lots.find(y => y.lot === l.lot); if (x) x.qty += l.qty; else lots.push(Object.assign({}, l)); });
   if (!lots.length) return '';
-  const editable = lots.length === 1 && x.status !== 'BATAL' && x.status !== 'TERKIRIM' && !x._pending;
+  const editable = (i.lots || []).length === 1 && x.status !== 'BATAL' && x.status !== 'TERKIRIM' && !x._pending;
   if (editable) {
     const cur = lots[0].lot;
     const opts = ((lotData && lotData.lots) || []).filter(l => l.productId === i.productId && l.lot !== cur && l.sisa >= i.qty);
