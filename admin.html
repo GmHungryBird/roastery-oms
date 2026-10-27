@@ -108,6 +108,8 @@
   .label-sec { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 6px; }
   .group-h .rwho { text-transform: none; letter-spacing: 0; color: var(--accent); font-weight: 600; }
   .group-h .rwho.none { color: var(--muted); font-weight: 400; }
+  .saran { font-size: 13px; margin-top: 4px; color: var(--muted); }
+  .saran .lotcode { font-size: 13px; }
   .lotline { font-size: 13px; color: var(--muted); margin: 2px 0 4px 14px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
   .lotline select { font-size: 13px; padding: 3px 6px; max-width: 220px; }
   .lotcode { font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 600; color: var(--ink); }
@@ -293,7 +295,7 @@ function shipMini(x) {
 
 function card(o) {
   const soon = o.status === 'MASUK' && o.tglKirim <= today;
-  const items = o.items.map(i => `<div><span>${i.qty} × ${esc(i.nama)}${progressText(i)}</span><span class="sub">${rp(i.qty * i.harga)}</span></div>`).join('');
+  const items = o.items.map(i => `<div><span>${i.qty} × ${esc(i.nama)}${progressText(i)}</span><span class="sub">${i.harga ? rp(i.qty * i.harga) : '<span class="lotnone">harga belum diisi</span>'}</span></div>`).join('');
   const sisa = o.items.reduce((s, i) => s + i.sisa, 0);
   const jalan = ['DIVALIDASI'].concat(BERJALAN).includes(o.status);
   let actions = '';
@@ -463,13 +465,40 @@ function showFormMsg(msg) {
 }
 
 /* ---------- Produksi ---------- */
+/* Saran kode produksi per pesanan: kemasan dengan kode tertua dipakai dulu, berurutan sesuai daftar (sama dengan aturan server saat Siap kirim). */
+let saranMap = {}, urutIds = [];
+function hitungSaran(d, urutOrder) {
+  const sisa = {};
+  Object.keys(d.stokKode || {}).forEach(pid => { sisa[pid] = d.stokKode[pid].map(k => ({ lot: k.lot, n: k.sisa })); });
+  saranMap = {};
+  urutOrder.forEach(o => {
+    saranMap[o.id] = o.items.filter(i => i.sisa > 0).map(i => {
+      let need = i.sisa; const ambil = [];
+      (sisa[i.productId] || []).forEach(k => { if (need > 0 && k.n > 0) { const t = Math.min(need, k.n); ambil.push({ lot: k.lot, q: t }); k.n -= t; need -= t; } });
+      return { nama: i.nama, ambil, kurang: need };
+    });
+  });
+}
+function saranHTML(o) {
+  const s = saranMap[o.id] || [];
+  if (!s.length) return '';
+  return `<div class="saran">${s.map(x => `<div>${esc(x.nama)}: ${x.ambil.map(a => `<span class="lotcode">${esc(a.lot)}</span> ×${a.q}`).join(' + ')}${x.kurang > 0 ? `${x.ambil.length ? ' + ' : ''}<span class="lotnone">${x.kurang} belum ada kemasan berkode</span>` : ''}</div>`).join('')}</div>`;
+}
+
 function renderProduksi() {
   const d = prodData;
   const ordersById = {};
   d.orders.forEach(o => { ordersById[o.id] = o; });
+  const urutSemua = [];
+  d.hari.forEach(h => {
+    const ids = [...new Set(h.produk.flatMap(p => p.rincian.map(r => r.orderId)))];
+    ids.map(id => ordersById[id]).filter(Boolean).sort((a, b) => a.ruteUrutan - b.ruteUrutan || a.customer.localeCompare(b.customer)).forEach(o => { if (!urutSemua.includes(o)) urutSemua.push(o); });
+  });
+  hitungSaran(d, urutSemua);
+  urutIds = urutSemua.map(o => o.id);
   const days = d.hari.map(h => {
     const telat = h.tanggal < today;
-    const rows = h.produk.map(p => `<tr><td><b>${esc(p.nama)}</b><div class="who-list">${p.rincian.map(r => `${esc(r.customer)} ${r.qty}`).join(' · ')}</div></td><td class="num">${p.qty}</td><td class="num" style="color:${(p.stok || 0) >= p.qty ? 'var(--ok)' : 'var(--warn)'}">${p.stok || 0}</td></tr>`).join('');
+    const rows = h.produk.map(p => `<tr><td><b>${esc(p.nama)}</b><div class="who-list">${p.rincian.map(r => `${esc(r.customer)} ${r.qty}`).join(' · ')}</div>${(d.stokKode[p.productId] || []).length ? `<div class="who-list">Stok berkode: ${d.stokKode[p.productId].map(k => `<span class="lotcode">${esc(k.lot)}</span> ${k.sisa}`).join(' · ')}</div>` : ''}</td><td class="num">${p.qty}</td><td class="num" style="color:${(p.stok || 0) >= p.qty ? 'var(--ok)' : 'var(--warn)'}">${p.stok || 0}</td></tr>`).join('');
     const oids = [...new Set(h.produk.flatMap(p => p.rincian.map(r => r.orderId)))];
     const list = oids.map(id => ordersById[id]).filter(Boolean).sort((a, b) => a.ruteUrutan - b.ruteUrutan || a.customer.localeCompare(b.customer));
     let lastR = null;
@@ -480,13 +509,13 @@ function renderProduksi() {
       const on = prodPick.has(o.id);
       return head + `<div class="row${on ? ' picked' : ''}"><label class="ckrow"><input type="checkbox" class="ck" data-po="${esc(o.id)}" ${on ? 'checked' : ''}>
         <div><div class="name">${esc(o.customer)}</div>
-        <div class="sub">${esc(o.id)} · ${o.items.filter(i => i.sisa > 0).map(i => i.sisa + '× ' + esc(i.nama)).join(', ')}</div></div></label>
+        <div class="sub">${esc(o.id)} · ${o.items.filter(i => i.sisa > 0).map(i => i.sisa + '× ' + esc(i.nama)).join(', ')}</div>${saranHTML(o)}</div></label>
         <button class="btn sec" data-ship="${esc(o.id)}" title="Kirim sebagian / atur detail">Sebagian…</button></div>`;
     }).join('');
     return `<div class="day card">
       <h3>${esc(tgl(h.tanggal))}${h.tanggal === today ? ' <span class="status st-MASUK">hari ini</span>' : ''}${telat ? ' <span class="status" style="color:var(--err)">terlambat</span>' : ''}</h3>
       <table class="tbl"><tr><th>Produk & customer</th><th class="num">Qty</th><th class="num" title="Stok dari kode produksi yang sudah dikemas">Stok</th></tr>${rows}</table>
-      <p class="group-h">Centang pesanan yang barangnya sudah siap, per rute</p>${ords}</div>`;
+      <p class="group-h">Centang pesanan yang barangnya sudah siap, per rute</p><p class="sub" style="margin:-4px 0 8px">Ambil kemasan sesuai <b>kode</b> yang tertulis di bawah tiap pesanan. Kode yang tercatat di pengiriman mengikuti saran ini.</p>${ords}</div>`;
   }).join('');
   $('#main').innerHTML = `${flash ? `<div class="alert ${flash.ok ? 'ok' : 'bad'}">${esc(flash.text)}</div>` : ''}
     <div class="filters"><div class="sub grow">Qty yang <b>belum dijadwalkan kirim</b> dari pesanan yang sudah divalidasi, per tanggal kirim yang diminta.</div><button class="chip" id="reload">Muat ulang</button></div>
@@ -501,7 +530,8 @@ function renderProduksi() {
 }
 
 async function bulkShip() {
-  const ids = [...prodPick]; if (!ids.length || busy) return;
+  // Urut sesuai daftar supaya kode yang dipakai server sama dengan saran di layar
+  const ids = [...prodPick].sort((a, b) => urutIds.indexOf(a) - urutIds.indexOf(b)); if (!ids.length || busy) return;
   // Layar langsung berubah: pesanan yang dicentang hilang dari daftar kerja, server menyusul
   const before = JSON.stringify(prodData);
   prodData.hari.forEach(h => { h.produk.forEach(p => { p.rincian = p.rincian.filter(r => !ids.includes(r.orderId)); p.qty = p.rincian.reduce((a, r) => a + r.qty, 0); }); h.produk = h.produk.filter(p => p.rincian.length); });
