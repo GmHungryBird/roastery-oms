@@ -148,6 +148,20 @@
     body { background: #fff; }
     .rep { font-size: 10px; }
   }
+
+  /* Warna status: kuning = masih produksi, hijau = siap kirim, biru = dalam perjalanan */
+  :root { --st-prod-bg: #fff1c2; --st-prod: #7a5800; --st-siap-bg: #d9f2df; --st-siap: #1e6b3a; --st-jalan-bg: #dbe9fb; --st-jalan: #1f4f8f; --st-masuk-bg: #fde3cf; --st-masuk: #9a4a12; }
+  @media (prefers-color-scheme: dark) { :root { --st-prod-bg: #4a3a0c; --st-prod: #ffd968; --st-siap-bg: #173d24; --st-siap: #8fe0aa; --st-jalan-bg: #18304f; --st-jalan: #9cc4f5; --st-masuk-bg: #4a2a14; --st-masuk: #f4b98a; } }
+  .status.st-MASUK { background: var(--st-masuk-bg); color: var(--st-masuk); }
+  .status.st-DIVALIDASI, .status.st-DIPROSES, .status.st-DIRENCANAKAN { background: var(--st-prod-bg); color: var(--st-prod); }
+  .status.st-SIAP_KIRIM { background: var(--st-siap-bg); color: var(--st-siap); }
+  .status.st-DIKIRIM, .status.st-SEBAGIAN { background: var(--st-jalan-bg); color: var(--st-jalan); }
+  .status.st-TERKIRIM, .status.st-SELESAI { background: var(--chip); color: var(--ink); }
+  .status.st-TERKIRIM::before, .status.st-SELESAI::before { content: '✓ '; }
+  .status.st-BATAL { background: transparent; color: var(--muted); }
+  .card.order.bd-DIRENCANAKAN { border-left: 4px solid #e8b923; }
+  .card.order.bd-SIAP_KIRIM { border-left: 4px solid #2f9a55; }
+  .card.order.bd-DIKIRIM { border-left: 4px solid #3b78c4; }
 </style>
 </head>
 <body>
@@ -165,7 +179,7 @@ const rp = n => 'Rp ' + Number(n || 0).toLocaleString('id-ID');
 const tgl = s => { const d = new Date(String(s).slice(0, 10) + 'T00:00:00+08:00'); return isNaN(d) ? s : d.toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short' }); };
 const FILTERS = [['MASUK', 'Pesanan masuk'], ['DIVALIDASI', 'Divalidasi'], ['BERJALAN', 'Diproses & dikirim'], ['SELESAI', 'Terkirim'], ['BATAL', 'Dibatalkan'], ['', 'Semua']];
 const BERJALAN = ['DIPROSES', 'DIKIRIM', 'SEBAGIAN'];
-const SHIP_FILTERS = [['AKTIF', 'Belum terkirim'], ['DIRENCANAKAN', 'Dijadwalkan'], ['SIAP_KIRIM', 'Siap dikirim'], ['DIKIRIM', 'Dalam perjalanan'], ['TERKIRIM', 'Terkirim'], ['BATAL', 'Dibatalkan']];
+const SHIP_FILTERS = [['AKTIF', 'Belum terkirim'], ['DIRENCANAKAN', 'Masih produksi'], ['SIAP_KIRIM', 'Siap dikirim'], ['DIKIRIM', 'Dalam perjalanan'], ['TERKIRIM', 'Terkirim'], ['BATAL', 'Dibatalkan']];
 const NEXT = { DIRENCANAKAN: ['SIAP_KIRIM', 'Siap dikirim'], SIAP_KIRIM: ['DIKIRIM', 'Dibawa kurir (manual)'], DIKIRIM: ['TERKIRIM', 'Tandai terkirim (manual)'] };
 const store = { get(k) { try { return sessionStorage.getItem(k); } catch (e) { return null; } }, set(k, v) { try { sessionStorage.setItem(k, v); } catch (e) {} }, del(k) { try { sessionStorage.removeItem(k); } catch (e) {} } };
 
@@ -286,7 +300,7 @@ function card(o) {
   if (isAdmin() && o.status === 'DIVALIDASI') actions += `<button class="btn sec" data-edit="${esc(o.id)}">Ubah</button><button class="btn ghost" data-cancel="${esc(o.id)}">Batalkan</button>`;
   if (isAdmin() && BERJALAN.includes(o.status) && sisa > 0) actions += `<button class="btn ghost" data-close="${esc(o.id)}">Tutup sisa</button>`;
   return `<div class="card order${soon ? ' soon' : ''}${o._pending ? ' pending' : ''}" id="o-${esc(o.id)}">
-    <div class="head"><div class="name">${esc(o.customer)}</div><span class="status st-${esc(o.status)}">${esc(o.statusLabel)}</span></div>
+    <div class="head"><div class="name">${esc(o.customer)}</div><span class="status st-${esc(o.tampil || o.status)}">${esc(o.statusLabel)}</span></div>
     <div class="sub">${esc(o.id)} · ${esc(o.customerId)} · dipesan ${esc(o.tglOrder)}</div>
     <div style="margin:2px 0">${ruteTag(o)}</div>
     <div class="sub"><b style="color:var(--ink)">Kirim ${esc(tgl(o.tglKirim))}</b>${soon ? ' · <span style="color:var(--warn)">hari ini / terlambat</span>' : ''}</div>
@@ -577,7 +591,7 @@ function shipCard(x) {
   const final = x.status === 'TERKIRIM' || x.status === 'BATAL';
   const kurirSel = `<select data-kurir="${esc(x.id)}"><option value="">Pilih kurir…</option>${couriers.map(k => `<option value="${esc(k.id)}"${k.id === x.kurirId ? ' selected' : ''}>${esc(k.nama)}</option>`).join('')}</select>`;
   const on = shipPick.has(x.id);
-  return `<div class="card order${on ? ' picked' : ''}${x._pending ? ' pending' : ''}">
+  return `<div class="card order bd-${esc(x.status)}${on ? ' picked' : ''}${x._pending ? ' pending' : ''}">
     <div class="head"><label class="ckrow">${x.status === 'DIRENCANAKAN' ? `<input type="checkbox" class="ck" data-sp="${esc(x.id)}" ${on ? 'checked' : ''}>` : ''}<span class="name">${esc(x.customer)}</span></label><span class="status st-${esc(x.status)}">${esc(x.statusLabel)}</span></div>
     <div class="sub">${esc(x.id)} · ${esc(x.orderId)} · ${esc(tgl(x.tglRencana))}</div>
     <div style="margin:2px 0">${ruteTag(x)}${shipGroup === 'rute' && x.kurir ? ` <span class="sub">${esc(x.kurir)}</span>` : ''}</div>
@@ -840,7 +854,7 @@ function renderPengiriman() {
     </div>
     <div class="filters"><span class="sub">Kelompokkan:</span><button class="chip${shipGroup === 'rute' ? ' on' : ''}" data-sg="rute">Per rute</button><button class="chip${shipGroup === 'kurir' ? ' on' : ''}" data-sg="kurir">Per kurir</button></div>
     ${dates.length ? dates.map(d => `<h3 class="date-h${d < today ? ' late' : ''}">${esc(dayLabel(d))} <span class="sub">· ${byDate[d].length} pengiriman</span></h3>${section(byDate[d])}`).join('') : '<div class="msg">Tidak ada pengiriman di sini.</div>'}
-    ${shipData.some(x => x.status === 'DIRENCANAKAN') ? `<div class="bulkbar"><span class="sub">Centang pengiriman yang dijadwalkan, lalu tandai siap sekaligus.</span><button class="btn ok" id="bulkReady" ${shipPick.size && !busy ? '' : 'disabled'}>Siap dikirim (${shipPick.size})</button></div>` : ''}
+    ${shipData.some(x => x.status === 'DIRENCANAKAN') ? `<div class="bulkbar"><span class="sub">Centang yang barangnya sudah siap, lalu tandai siap kirim sekaligus.</span><button class="btn ok" id="bulkReady" ${shipPick.size && !busy ? '' : 'disabled'}>Siap dikirim (${shipPick.size})</button></div>` : ''}
     <p class="sub" style="margin-top:18px"><b>Dalam perjalanan</b> terisi otomatis saat kurir memuat barang di aplikasi Delivery, dan <b>Terkirim</b> saat kurir men-stamp. Tombol manual hanya untuk cadangan.</p>`;
   flash = null;
   if ($('#bulkReady')) $('#bulkReady').onclick = bulkReady;
@@ -848,7 +862,7 @@ function renderPengiriman() {
   $('#sdate').onchange = e => { shipDate = e.target.value; load(); };
 }
 
-const SHIP_LABEL = { DIRENCANAKAN: 'Dijadwalkan', SIAP_KIRIM: 'Siap dikirim', DIKIRIM: 'Dalam perjalanan', TERKIRIM: 'Terkirim', BATAL: 'Dibatalkan' };
+const SHIP_LABEL = { DIRENCANAKAN: 'Masih produksi', SIAP_KIRIM: 'Siap dikirim', DIKIRIM: 'Dalam perjalanan', TERKIRIM: 'Terkirim', BATAL: 'Dibatalkan' };
 async function shipUpdate(id, extra, okText) {
   // Layar langsung berubah; server menyusul
   const x = shipData && shipData.find(y => y.id === id);
