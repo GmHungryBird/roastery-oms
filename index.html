@@ -60,6 +60,17 @@
   .ship .head { font-size: 13px; }
   .st-TERKIRIM { color: var(--ok); } .st-DIRENCANAKAN, .st-SIAP_KIRIM, .st-DIKIRIM { color: var(--accent); }
   .prog { color: var(--muted); font-size: 13px; }
+
+  /* Warna status: kuning = masih produksi, hijau = siap kirim, biru = dalam perjalanan */
+  :root { --st-prod-bg: #fff1c2; --st-prod: #7a5800; --st-siap-bg: #d9f2df; --st-siap: #1e6b3a; --st-jalan-bg: #dbe9fb; --st-jalan: #1f4f8f; --st-masuk-bg: #fde3cf; --st-masuk: #9a4a12; }
+  @media (prefers-color-scheme: dark) { :root { --st-prod-bg: #4a3a0c; --st-prod: #ffd968; --st-siap-bg: #173d24; --st-siap: #8fe0aa; --st-jalan-bg: #18304f; --st-jalan: #9cc4f5; --st-masuk-bg: #4a2a14; --st-masuk: #f4b98a; } }
+  .status.st-MASUK { background: var(--st-masuk-bg); color: var(--st-masuk); }
+  .status.st-DIVALIDASI, .status.st-DIPROSES, .status.st-DIRENCANAKAN { background: var(--st-prod-bg); color: var(--st-prod); }
+  .status.st-SIAP_KIRIM { background: var(--st-siap-bg); color: var(--st-siap); }
+  .status.st-DIKIRIM, .status.st-SEBAGIAN { background: var(--st-jalan-bg); color: var(--st-jalan); }
+  .status.st-TERKIRIM, .status.st-SELESAI { background: var(--chip); color: var(--ink); }
+  .status.st-TERKIRIM::before, .status.st-SELESAI::before { content: '✓ '; }
+  .status.st-BATAL { background: transparent; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -145,7 +156,7 @@ function orderCard(o) {
       ${x.status === 'TERKIRIM' ? `<div class="prog">Diterima ${esc(x.waktuTerkirim)}${x.penerima ? ' oleh ' + esc(x.penerima) : ''}</div>` : ''}
       ${x.invoiceNo ? `<div class="prog">Invoice ${esc(x.invoiceNo)} · ${rp(x.total)}</div>` : ''}</div>`).join('');
   return `<div class="order">
-    <div class="head"><div class="name">${esc(o.id)}</div><span class="status st-${esc(o.status)}">${esc(o.statusLabel)}</span></div>
+    <div class="head"><div class="name">${esc(o.id)}</div><span class="status st-${esc(o.tampil || o.status)}">${esc(o.statusLabel)}</span></div>
     <div class="sub">Dipesan ${esc(o.tglOrder)} · Kirim ${esc(tgl(o.tglKirim))}</div>
     <div style="margin:6px 0">${items}</div>
     ${ships ? `<div class="ships">${ships}</div>` : ''}
