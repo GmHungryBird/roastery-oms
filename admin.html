@@ -118,6 +118,30 @@
   .rep td.num, .rep th.num { text-align: right; }
   .tblwrap { overflow-x: auto; }
   .printonly { display: none; }
+  .kcard h2 { display: flex; gap: 10px; align-items: center; }
+  .stepno { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--ink); color: #fff; font-size: 15px; flex: none; }
+  .packrow { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .packrow .grow { flex: 1; }
+  .packrow input { width: 90px; text-align: right; }
+  .kgbar { font-size: 14px; margin-top: 10px; }
+  .kgbar.over { color: var(--err); font-weight: 600; }
+  .batchrow { padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .batchrow .acts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .labelbox { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+  .labelbox input { width: 80px; }
+  #printArea { display: none; }
+  body.printing #printArea { display: block; }
+  body.printing #printArea.sz-a4 { display: grid; }
+  body.printing > :not(#printArea) { display: none !important; }
+  .lbl { box-sizing: border-box; overflow: hidden; color: #000; font-family: Arial, Helvetica, sans-serif; break-inside: avoid; page-break-inside: avoid; }
+  .lbl .co { font-size: 6.5pt; }
+  .lbl .pn { font-size: 9pt; font-weight: 700; line-height: 1.15; margin: 1mm 0; }
+  .lbl .kd { font-size: 10pt; font-weight: 700; font-family: 'Courier New', monospace; }
+  .lbl .ln { font-size: 7pt; line-height: 1.3; }
+  .lbl.wadah .kd { font-size: 16pt; }
+  .sz-roll .lbl { width: 50mm; height: 30mm; padding: 2mm 2.5mm; page-break-after: always; break-after: page; }
+  .sz-a4 { display: grid; grid-template-columns: repeat(3, 63.5mm); grid-auto-rows: 38.1mm; column-gap: 2.5mm; }
+  .sz-a4 .lbl { padding: 3mm; border: 0.2mm dashed #bbb; }
   @media print {
     header, nav, .filters, .noprint, .alert { display: none !important; }
     .printonly { display: block; }
@@ -148,7 +172,7 @@ const store = { get(k) { try { return sessionStorage.getItem(k); } catch (e) { r
 let auth = null, all = [], filter = 'MASUK', q = '', flash = null, today = '', view = 'pesanan';
 let prodData = null, shipData = null, couriers = [], shipFilter = 'AKTIF', shipDate = '', shipForm = null, shipGroup = 'rute';
 let prodPick = new Set(), shipPick = new Set(), busy = false;
-let lotData = null, lotForm = null, lotDone = null, repJenis = 'form17', repBulan = '', repData = null;
+let lotData = null, batchForm = null, packForm = null, lotDone = null, labelFor = null, repJenis = 'form17', repBulan = '', repData = null;
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
 const ruteLabel = r => r || 'Belum ada rute';
 const ruteTag = o => `<span class="rtag${o.rute ? '' : ' none'}">${esc(ruteLabel(o.rute))}</span>`;
@@ -597,71 +621,165 @@ async function setLot(shipId, itemId, lotId, sel) {
   keepScroll(renderPengiriman);
 }
 
-/* ---------- Kode produksi (FORM-16) ---------- */
+/* ---------- Kode produksi: wadah (batch) → kemas → label ---------- */
+const fmtD = d => d ? d.slice(8, 10) + '-' + d.slice(5, 7) + '-' + d.slice(0, 4) : '';
+const netto = g => !g ? '1 kg' : g >= 1000 ? (g / 1000) + ' kg' : g + ' g';
 function renderKode() {
   const d = lotData;
-  if (!lotForm) lotForm = { ref: uid(), productId: '', tglKemas: d.hariIni, tglRoast: '', qty: '', catatan: '' };
-  const f = lotForm;
-  const p = d.produk.find(x => x.id === f.productId);
-  const preview = p && f.tglKemas ? `${p.kode}-${f.tglKemas.slice(2).replace(/-/g, '')}-…` : '';
-  const stokPer = {};
-  d.lots.forEach(l => { (stokPer[l.nama] = stokPer[l.nama] || []).push(l); });
-  const stokHtml = Object.keys(stokPer).sort().map(n => {
-    const ls = stokPer[n], tot = ls.reduce((a, l) => a + l.sisa, 0);
-    return `<tr><td><b>${esc(n)}</b></td><td class="num"><b>${tot}</b></td><td>${ls.slice().sort((a, b) => a.tglKemas.localeCompare(b.tglKemas)).map(l =>
-      `<div><span class="lotcode">${esc(l.lot)}</span> · sisa ${l.sisa} dari ${l.qty} · exp ${esc(l.exp)}${l.exp && l.exp <= d.hariIni ? ' <span class="lotnone">kedaluwarsa</span>' : ''}</div>`).join('')}</td></tr>`;
-  }).join('');
+  if (!batchForm) batchForm = { ref: uid(), jenis: '', tglRoast: d.hariIni, kg: '', kgGreen: '', catatan: '' };
+  if (!packForm) packForm = { ref: uid(), lotId: '', tglKemas: d.hariIni, qty: {}, habis: false, catatan: '' };
+  const bf = batchForm, pf = packForm;
+  const open = d.batches.filter(b => b.sisaKg > 0);
+  if (pf.lotId && !open.some(b => b.lot === pf.lotId)) pf.lotId = '';
+  const bt = open.find(b => b.lot === pf.lotId);
+  const jn = bt ? d.jenis.find(j => j.jenis === bt.jenis) : null;
+  const jsel = d.jenis.find(j => j.jenis === bf.jenis);
+  const kgPakai = jn ? Math.round(jn.produk.reduce((a, p) => a + (Number(String(pf.qty[p.id] || '').replace(',', '.')) || 0) * p.kgPerUnit, 0) * 1000) / 1000 : 0;
+  const done = lotDone;
+  const doneHtml = !done ? '' : done.type === 'batch' ? `<div class="card" style="border:2px solid var(--ok);margin-bottom:16px">
+      <div class="sub">Kode wadah · ${esc(done.jenis)} · ${done.kg} kg · roast ${esc(fmtD(done.tglRoast))}</div>
+      <div class="bigcode">${esc(done.lot)}</div><div><b>EXP ${esc(fmtD(done.exp))}</b></div>
+      <p class="sub" style="margin:8px 0 0">Tempel kode ini di wadahnya sekarang. Wadah dan kode tidak boleh terpisah.</p>
+      <div class="labelbox"><button class="btn sec" data-plwadah="${esc(done.lot)}">Cetak label wadah</button></div></div>`
+    : `<div class="card" style="border:2px solid var(--ok);margin-bottom:16px">
+      <div class="sub">Dikemas dari wadah · ${esc(done.jenis)}</div>
+      <div class="bigcode">${esc(done.lot)}</div><div><b>EXP ${esc(fmtD(done.exp))}</b></div>
+      <div style="margin-top:6px">${done.label.map(l => `${l.qty} ${esc(l.satuan)} · ${esc(l.nama)}`).join('<br>')}</div>
+      <p class="sub" style="margin:8px 0 0">${done.habis ? 'Wadah ditandai habis.' : 'Sisa di wadah: ' + done.sisaKg + ' kg.'}${done.terisi ? ' ' + done.terisi + ' pengiriman yang belum berkode langsung memakai kode ini.' : ''}</p>
+      <div class="labelbox">${done.label.map(l => `<button class="btn" data-plprod="${esc(done.lot)}" data-pid="${esc(l.productId)}" data-n="${Math.ceil(l.qty)}">Cetak ${Math.ceil(l.qty)} label ${esc(netto(l.gram))}</button>`).join('')}</div></div>`;
+  const batchList = d.batches.map(b => `<div class="batchrow">
+      <div><span class="lotcode">${esc(b.lot)}</span> · ${esc(b.jenis)} · roast ${esc(fmtD(b.tglRoast))} · exp ${esc(fmtD(b.exp))}${b.exp && b.exp <= d.hariIni ? ' <span class="lotnone">kedaluwarsa</span>' : ''}</div>
+      <div class="sub">Wadah: ${b.habis ? 'habis' : '<b style="color:var(--ink)">' + b.sisaKg + ' kg</b> dari ' + b.kg + ' kg'}${b.stok.filter(x => x.sisa > 0).length ? ' · Stok kemasan: ' + b.stok.filter(x => x.sisa > 0).map(x => x.sisa + ' ' + esc(x.satuan) + ' ' + esc(x.nama)).join(', ') : ''}</div>
+      <div class="acts">
+        ${b.stok.filter(x => x.qty > 0).map(x => `<button class="chip" data-labelfor="${esc(b.lot)}|${esc(x.productId)}">Label ${esc(x.nama)}</button>`).join('')}
+        <button class="chip" data-plwadah="${esc(b.lot)}">Label wadah</button>
+        ${!b.habis && b.sisaKg > 0 ? `<button class="chip" data-closebatch="${esc(b.lot)}">Tandai wadah habis</button>` : ''}
+      </div>
+      ${labelFor && labelFor.lot === b.lot ? `<div class="labelbox"><span class="sub">Jumlah label ${esc((b.stok.find(x => x.productId === labelFor.pid) || {}).nama || '')}:</span><input id="lbln" inputmode="numeric" value="${labelFor.n}"><button class="btn" data-plprod="${esc(b.lot)}" data-pid="${esc(labelFor.pid)}" data-n="ask">Cetak</button></div>` : ''}
+    </div>`).join('');
   $('#main').innerHTML = `${flash ? `<div class="alert ${flash.ok ? 'ok' : 'bad'}">${esc(flash.text)}</div>` : ''}
-    ${lotDone ? `<div class="card" style="border:2px solid var(--ok);margin-bottom:16px">
-      <div class="sub">Kode produksi untuk label · ${esc(lotDone.nama)} · ${lotDone.qty}</div>
-      <div class="bigcode">${esc(lotDone.lot)}</div>
-      <div><b>EXP ${esc(lotDone.exp)}</b></div>
-      ${lotDone.terisi ? `<div class="sub" style="margin-top:6px">${lotDone.terisi} pengiriman yang belum berkode langsung memakai kode ini.</div>` : ''}
-    </div>` : ''}
-    <div class="form"><div class="card">
-      <h2>Catat hasil kemas</h2>
-      <p class="sub" style="margin:0 0 10px">Satu catatan = satu kode produksi (FORM-16). Kode dan tanggal kedaluwarsa (+${d.masaSimpan} bulan) dibuat otomatis.</p>
-      <label for="lp">Produk</label><select id="lp"><option value="">Pilih produk…</option>${d.produk.map(x => `<option value="${esc(x.id)}"${x.id === f.productId ? ' selected' : ''}>${esc(x.nama)}</option>`).join('')}</select>
-      <label for="lk">Tanggal kemas</label><input type="date" id="lk" value="${esc(f.tglKemas)}" max="${esc(d.hariIni)}">
-      <label for="lr">Tanggal roasting (kosong = sama dengan kemas)</label><input type="date" id="lr" value="${esc(f.tglRoast)}" max="${esc(d.hariIni)}">
-      <label for="lq">Jumlah dikemas${p ? ' (' + p.satuan + ')' : ''}</label><input id="lq" inputmode="decimal" value="${esc(f.qty)}" placeholder="${p && p.satuan === 'pcs' ? 'mis. 40' : 'mis. 25'}">
-      <label for="lc">Catatan</label><input id="lc" maxlength="200" value="${esc(f.catatan)}" placeholder="Opsional, mis. batch roast 1–3">
-      ${preview ? `<p class="sub" style="margin:10px 0 0">Kode yang akan dibuat: <span class="lotcode">${esc(preview)}</span></p>` : ''}
+    ${doneHtml}
+    <div class="form">
+    <div class="card kcard">
+      <h2><span class="stepno">1</span>Batch baru masuk wadah</h2>
+      <p class="sub" style="margin:0 0 10px">Setelah roasting/blending selesai. Sistem membuat <b>kode produksi untuk wadah itu</b>. Semua kemasan dari wadah ini memakai kode yang sama.</p>
+      <label for="bj">Jenis kopi</label><select id="bj"><option value="">Pilih…</option>${d.jenis.map(j => `<option value="${esc(j.jenis)}"${j.jenis === bf.jenis ? ' selected' : ''}>${esc(j.jenis)}</option>`).join('')}</select>
+      ${jsel ? `<p class="sub" style="margin:4px 0 0">Bisa dikemas jadi: ${jsel.produk.map(p => esc(p.nama)).join(', ')}</p>` : ''}
+      <label for="bt">Tanggal roasting / blend</label><input type="date" id="bt" value="${esc(bf.tglRoast)}" max="${esc(d.hariIni)}">
+      <label for="bk">Berat di wadah (kg)</label><input id="bk" inputmode="decimal" value="${esc(bf.kg)}" placeholder="mis. 50">
+      <label for="bg">Green bean dipakai (kg, opsional)</label><input id="bg" inputmode="decimal" value="${esc(bf.kgGreen)}">
+      <label for="bc">Catatan</label><input id="bc" maxlength="200" value="${esc(bf.catatan)}" placeholder="Opsional, mis. roast batch 1–4">
+      ${jsel && bf.tglRoast ? `<p class="sub" style="margin:10px 0 0">Kode: <span class="lotcode">${esc(jsel.kode)}-${esc(bf.tglRoast.slice(2).replace(/-/g, ''))}-…</span> · EXP +${d.masaSimpan} bulan</p>` : ''}
+      <div style="text-align:right;margin-top:12px"><button class="btn" id="saveBatch" ${busy ? 'disabled' : ''}>Buat kode wadah</button></div>
     </div>
-    <div class="savebar"><span class="sub">Satuan sama dengan satuan pesanan (kg untuk 1 kg, pcs untuk kemasan kecil).</span><button class="btn" id="saveLot" ${busy ? 'disabled' : ''}>${busy ? 'Menyimpan…' : 'Simpan & buat kode'}</button></div></div>
-    <h3 style="margin-top:26px">Stok per kode produksi</h3>
-    <p class="sub">Stok berkurang otomatis saat pengiriman dibuat (kode tertua dipakai dulu) dan kembali bila pengiriman dibatalkan.</p>
-    ${stokHtml ? `<div class="tblwrap"><table class="rep"><tr><th>Produk</th><th class="num">Stok</th><th>Kode</th></tr>${stokHtml}</table></div>` : '<div class="msg">Belum ada stok. Catat hasil kemas di atas.</div>'}
-    <div class="filters" style="margin-top:12px"><button class="chip" id="reload">Muat ulang</button></div>`;
+    <div class="card kcard" style="margin-top:16px">
+      <h2><span class="stepno">2</span>Kemas dari wadah</h2>
+      <p class="sub" style="margin:0 0 10px">Pilih wadah yang <b>sedang dibuka</b> (cocokkan dengan label di wadah). Hanya satu wadah terbuka di meja kemas.</p>
+      <label for="pw">Wadah / kode produksi</label><select id="pw"><option value="">Pilih wadah…</option>${open.map(b => `<option value="${esc(b.lot)}"${b.lot === pf.lotId ? ' selected' : ''}>${esc(b.lot)} · ${esc(b.jenis)} · sisa ${b.sisaKg} kg</option>`).join('')}</select>
+      ${bt ? `<label for="pt">Tanggal kemas</label><input type="date" id="pt" value="${esc(pf.tglKemas)}" min="${esc(bt.tglRoast)}" max="${esc(d.hariIni)}">
+        <p class="label-sec" style="margin-top:14px">Jumlah dikemas</p>
+        ${jn.produk.map(p => `<div class="packrow"><div class="grow"><div class="name">${esc(p.nama)}</div><div class="sub">${esc(netto(p.gram))} per ${p.satuan === 'pcs' ? 'pcs' : 'kemasan'}</div></div>
+          <input data-pq="${esc(p.id)}" inputmode="${p.satuan === 'pcs' ? 'numeric' : 'decimal'}" value="${esc(pf.qty[p.id] || '')}" placeholder="0"><span class="sub" style="width:28px">${esc(p.satuan)}</span></div>`).join('')}
+        <div class="kgbar${kgPakai > bt.sisaKg ? ' over' : ''}" id="kgbar">Terpakai ${kgPakai} kg dari sisa ${bt.sisaKg} kg${kgPakai > bt.sisaKg ? ' — melebihi isi wadah' : ' → sisa ' + Math.round((bt.sisaKg - kgPakai) * 1000) / 1000 + ' kg'}</div>
+        <label class="check"><input type="checkbox" id="ph" ${pf.habis ? 'checked' : ''}><span>Wadah sudah kosong setelah ini<br><span class="sub">Sisa susut/tercecer dianggap habis; wadah tidak muncul lagi di pilihan.</span></span></label>
+        <label for="pc">Catatan</label><input id="pc" maxlength="200" value="${esc(pf.catatan)}" placeholder="Opsional">
+        <div style="text-align:right;margin-top:12px"><button class="btn" id="savePack" ${busy || kgPakai > bt.sisaKg ? 'disabled' : ''}>${busy ? 'Menyimpan…' : 'Simpan kemas'}</button></div>` : open.length ? '' : '<p class="sub">Belum ada wadah terbuka. Buat kode wadah di langkah 1.</p>'}
+    </div></div>
+    <h3 style="margin-top:26px">Wadah & stok kemasan</h3>
+    <p class="sub">Stok kemasan berkurang otomatis saat pengiriman dibuat (kode tertua dipakai dulu) dan kembali bila pengiriman dibatalkan.</p>
+    <div class="card">${batchList || '<div class="sub">Belum ada.</div>'}</div>
+    <div class="filters" style="margin-top:12px"><span class="sub">Ukuran label:</span>
+      <button class="chip${labelSize() === 'roll' ? ' on' : ''}" data-lsz="roll">Printer label 50×30 mm</button>
+      <button class="chip${labelSize() === 'a4' ? ' on' : ''}" data-lsz="a4">Kertas A4 (3×7)</button>
+      <span class="grow"></span><button class="chip" id="reload">Muat ulang</button></div>`;
   flash = null;
-  const keep = () => { f.productId = $('#lp').value; f.tglKemas = $('#lk').value; f.tglRoast = $('#lr').value; f.qty = $('#lq').value; f.catatan = $('#lc').value; };
-  ['#lp', '#lk'].forEach(sel => { $(sel).onchange = () => { keep(); keepScroll(renderKode); }; });
-  ['#lr', '#lq', '#lc'].forEach(sel => { $(sel).oninput = keep; });
-  $('#saveLot').onclick = saveLot;
+  const keepB = () => { bf.jenis = $('#bj').value; bf.tglRoast = $('#bt').value; bf.kg = $('#bk').value; bf.kgGreen = $('#bg').value; bf.catatan = $('#bc').value; };
+  $('#bj').onchange = () => { keepB(); keepScroll(renderKode); };
+  $('#bt').onchange = () => { keepB(); keepScroll(renderKode); };
+  ['#bk', '#bg', '#bc'].forEach(x => { $(x).oninput = keepB; });
+  $('#pw').onchange = () => { pf.lotId = $('#pw').value; pf.qty = {}; keepScroll(renderKode); };
+  if ($('#pt')) {
+    $('#pt').onchange = () => { pf.tglKemas = $('#pt').value; };
+    $('#ph').onchange = () => { pf.habis = $('#ph').checked; };
+    $('#pc').oninput = () => { pf.catatan = $('#pc').value; };
+    document.querySelectorAll('[data-pq]').forEach(inp => { inp.onchange = () => { pf.qty[inp.dataset.pq] = inp.value.trim(); keepScroll(renderKode); }; });
+    $('#savePack').onclick = savePack;
+  }
+  $('#saveBatch').onclick = saveBatch;
   $('#reload').onclick = () => load(true);
 }
 
-async function saveLot() {
-  const f = lotForm;
-  f.productId = $('#lp').value; f.tglKemas = $('#lk').value; f.tglRoast = $('#lr').value; f.qty = $('#lq').value.trim(); f.catatan = $('#lc').value;
-  if (!f.productId) { flash = { ok: false, text: 'Pilih produk.' }; return renderKode(); }
-  if (!(Number(f.qty.replace(',', '.')) > 0)) { flash = { ok: false, text: 'Isi jumlah yang dikemas.' }; return renderKode(); }
-  busy = true; renderKode();
+async function saveBatch() {
+  const f = batchForm;
+  if (!f.jenis) { flash = { ok: false, text: 'Pilih jenis kopi.' }; return renderKode(); }
+  if (!(Number(String(f.kg).replace(',', '.')) > 0)) { flash = { ok: false, text: 'Isi berat di wadah (kg).' }; return renderKode(); }
+  busy = true; $('#saveBatch').disabled = true; $('#saveBatch').textContent = 'Menyimpan…';
   let r;
-  try { r = await api({ action: 'adminLotCreate', staffId: auth.staffId, pin: auth.pin, ref: f.ref, productId: f.productId, tglKemas: f.tglKemas, tglRoast: f.tglRoast, qty: f.qty, catatan: f.catatan }); }
+  try { r = await api({ action: 'adminBatchCreate', staffId: auth.staffId, pin: auth.pin, ref: f.ref, jenis: f.jenis, tglRoast: f.tglRoast, kg: f.kg, kgGreen: f.kgGreen, catatan: f.catatan }); }
   catch (e) { r = { ok: false, error: 'Koneksi terputus. Coba simpan lagi; tidak akan tercatat dobel.' }; }
   busy = false;
   if (!r.ok) { flash = { ok: false, text: r.error }; return renderKode(); }
-  lotDone = r.duplicate ? { lot: r.lot, exp: '', nama: '', qty: '' } : r;
-  lotForm = { ref: uid(), productId: f.productId, tglKemas: f.tglKemas, tglRoast: '', qty: '', catatan: '' };
-  await load();
-  window.scrollTo(0, 0);
+  lotDone = Object.assign({ type: 'batch' }, r);
+  batchForm = null; packForm = { ref: uid(), lotId: r.lot, tglKemas: lotData.hariIni, qty: {}, habis: false, catatan: '' };
+  await load(); window.scrollTo(0, 0);
+}
+
+async function savePack() {
+  const f = packForm;
+  document.querySelectorAll('[data-pq]').forEach(inp => { f.qty[inp.dataset.pq] = inp.value.trim(); });
+  const items = Object.keys(f.qty).map(id => ({ productId: id, qty: f.qty[id] })).filter(x => Number(String(x.qty).replace(',', '.')) > 0);
+  if (!items.length) { flash = { ok: false, text: 'Isi jumlah yang dikemas.' }; return renderKode(); }
+  busy = true; $('#savePack').disabled = true; $('#savePack').textContent = 'Menyimpan…';
+  let r;
+  try { r = await api({ action: 'adminPackCreate', staffId: auth.staffId, pin: auth.pin, ref: f.ref, lotId: f.lotId, tglKemas: f.tglKemas, items, habis: f.habis, catatan: f.catatan }); }
+  catch (e) { r = { ok: false, error: 'Koneksi terputus. Coba simpan lagi; tidak akan tercatat dobel.' }; }
+  busy = false;
+  if (!r.ok) { flash = { ok: false, text: r.error }; return renderKode(); }
+  if (r.duplicate) { flash = { ok: true, text: 'Sudah tersimpan sebelumnya.' }; packForm = null; return load(); }
+  lotDone = Object.assign({ type: 'pack' }, r);
+  packForm = { ref: uid(), lotId: r.habis ? '' : f.lotId, tglKemas: f.tglKemas, qty: {}, habis: false, catatan: '' };
+  await load(); window.scrollTo(0, 0);
+}
+
+/* ---------- Cetak label ---------- */
+function labelSize() { return store.get('oms_label') || 'roll'; }
+function printLabels(html) {
+  const sz = labelSize();
+  let area = document.getElementById('printArea');
+  if (!area) { area = document.createElement('div'); area.id = 'printArea'; document.body.appendChild(area); }
+  let ps = document.getElementById('pageStyle');
+  if (!ps) { ps = document.createElement('style'); ps.id = 'pageStyle'; document.head.appendChild(ps); }
+  ps.textContent = sz === 'roll' ? '@page { size: 50mm 30mm; margin: 0; }' : '@page { size: A4; margin: 10mm 7mm; }';
+  area.className = 'sz-' + sz;
+  area.innerHTML = html;
+  document.body.classList.add('printing');
+  const done = () => { document.body.classList.remove('printing'); window.removeEventListener('afterprint', done); };
+  window.addEventListener('afterprint', done);
+  setTimeout(() => { window.print(); setTimeout(done, 500); }, 50);
+}
+function labelProduk(lot, pid, n) {
+  const b = lotData.batches.find(x => x.lot === lot);
+  const j = lotData.jenis.find(x => x.jenis === (b && b.jenis));
+  const p = (j && j.produk.find(x => x.id === pid)) || { nama: ((b && b.stok.find(x => x.productId === pid)) || {}).nama || pid, gram: '' };
+  if (!b) return;
+  n = Math.max(1, Math.min(1000, Math.floor(Number(n) || 0)));
+  const one = `<div class="lbl">${lotData.namaLabel ? `<div class="co">${esc(lotData.namaLabel)}</div>` : ''}
+    <div class="pn">${esc(p.nama)}</div>
+    <div class="kd">${esc(lot)}</div>
+    <div class="ln">Tgl produksi: ${esc(fmtD(b.tglRoast))}<br>Baik digunakan sebelum: ${esc(fmtD(b.exp))}<br>Netto: ${esc(netto(p.gram))}</div></div>`;
+  printLabels(one.repeat(n));
+}
+function labelWadah(lot) {
+  const b = lotData.batches.find(x => x.lot === lot) || (lotDone && lotDone.lot === lot ? lotDone : null);
+  if (!b) return;
+  printLabels(`<div class="lbl wadah"><div class="co">WADAH · ${esc(b.jenis)}</div><div class="kd">${esc(lot)}</div>
+    <div class="ln">Roast: ${esc(fmtD(b.tglRoast))} · ${b.kg} kg<br>EXP: ${esc(fmtD(b.exp))}</div></div>`);
 }
 
 /* ---------- Laporan BPOM ---------- */
 const REP_COLS = {
   form17: [['no', 'No'], ['produk', 'Nama Produk'], ['tglKeluar', 'Tanggal Keluar'], ['exp', 'Tanggal Kedaluwarsa'], ['kode', 'Kode Produksi'], ['diGudang', 'Jumlah Produk di Gudang', 1], ['keluar', 'Jumlah Produk Keluar Gudang', 1], ['sisa', 'Sisa Produk di Gudang', 1], ['satuan', 'Satuan'], ['tujuan', 'Tujuan Distributor'], ['suratJalan', 'No Surat Jalan'], ['paraf', 'Paraf']],
-  form16: [['no', 'No'], ['tglProduksi', 'Tanggal Produksi'], ['produk', 'Nama Produk'], ['jumlah', 'Jumlah Terkemas', 1], ['satuan', 'Satuan'], ['kode', 'Kode Produksi'], ['exp', 'Tanggal Kedaluwarsa'], ['masukGudang', 'Jumlah Masuk Gudang', 1], ['paraf', 'Paraf']]
+  form16: [['no', 'No'], ['tglProduksi', 'Tanggal Produksi'], ['tglKemas', 'Tanggal Kemas'], ['produk', 'Nama Produk'], ['jumlah', 'Jumlah Terkemas', 1], ['satuan', 'Satuan'], ['kode', 'Kode Produksi'], ['exp', 'Tanggal Kedaluwarsa'], ['masukGudang', 'Jumlah Masuk Gudang', 1], ['paraf', 'Paraf']]
 };
 const REP_TITLE = { form17: 'PKC-FORM-17 · Formulir Pengeluaran / Distribusi Produk Jadi', form16: 'PKC-FORM-16 · Formulir Pengemasan & Penyimpanan Produk Jadi' };
 
@@ -774,7 +892,7 @@ async function setStatus(id, status, alasan) {
 
 document.addEventListener('click', e => {
   const t = e.target.closest('button') || e.target;
-  if (t.dataset.view) { view = t.dataset.view; form = null; shipForm = null; lotDone = null; prodPick = new Set(); shipPick = new Set(); renderTabs(); $('#main').innerHTML = ''; load(); return; }
+  if (t.dataset.view) { view = t.dataset.view; form = null; shipForm = null; lotDone = null; labelFor = null; prodPick = new Set(); shipPick = new Set(); renderTabs(); $('#main').innerHTML = ''; load(); return; }
   if (shipForm) {
     if (t.dataset.sinc) setShipQty(t.dataset.sinc, (shipForm.qty[t.dataset.sinc] || 0) + 1);
     if (t.dataset.sdec) setShipQty(t.dataset.sdec, (shipForm.qty[t.dataset.sdec] || 0) - 1);
@@ -790,6 +908,17 @@ document.addEventListener('click', e => {
   if (t.dataset.ship) openShipForm(t.dataset.ship);
   if (t.dataset.sf) { shipFilter = t.dataset.sf; load(); }
   if (t.dataset.rj) { repJenis = t.dataset.rj; load(); }
+  if (t.dataset.lsz) { store.set('oms_label', t.dataset.lsz); keepScroll(renderKode); }
+  if (t.dataset.plwadah) labelWadah(t.dataset.plwadah);
+  if (t.dataset.plprod) labelProduk(t.dataset.plprod, t.dataset.pid, t.dataset.n === 'ask' ? ($('#lbln') || {}).value : t.dataset.n);
+  if (t.dataset.labelfor) { const [lot, pid] = t.dataset.labelfor.split('|'); const b = lotData.batches.find(x => x.lot === lot); const st = b && b.stok.find(x => x.productId === pid); labelFor = { lot, pid, n: st ? Math.ceil(st.sisa || st.qty) : 1 }; keepScroll(renderKode); }
+  if (t.dataset.closebatch) {
+    if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = 'Yakin? Klik lagi'; return; }
+    t.disabled = true;
+    api({ action: 'adminBatchClose', staffId: auth.staffId, pin: auth.pin, lotId: t.dataset.closebatch }).then(r => {
+      flash = r.ok ? { ok: true, text: 'Wadah ' + r.lot + ' ditandai habis.' } : { ok: false, text: r.error }; load();
+    });
+  }
   if (t.dataset.sg) { shipGroup = t.dataset.sg; render(); }
   if (t.dataset.sday !== undefined) { shipDate = t.dataset.sday; load(); }
   if (t.dataset.next) {
