@@ -106,6 +106,8 @@
   .date-h:first-of-type { border-top: 0; padding-top: 0; }
   .date-h.late { color: var(--err); }
   .label-sec { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 6px; }
+  .group-h .rwho { text-transform: none; letter-spacing: 0; color: var(--accent); font-weight: 600; }
+  .group-h .rwho.none { color: var(--muted); font-weight: 400; }
   .lotline { font-size: 13px; color: var(--muted); margin: 2px 0 4px 14px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
   .lotline select { font-size: 13px; padding: 3px 6px; max-width: 220px; }
   .lotcode { font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 600; color: var(--ink); }
@@ -185,6 +187,7 @@ const store = { get(k) { try { return sessionStorage.getItem(k); } catch (e) { r
 let auth = null, all = [], filter = 'MASUK', q = '', flash = null, today = '', view = 'pesanan';
 let prodData = null, shipData = null, couriers = [], shipFilter = 'AKTIF', shipDate = '', shipForm = null, shipGroup = 'rute';
 let prodPick = new Set(), shipPick = new Set(), busy = false;
+let ruteKurir = {};
 let lotData = null, batchForm = null, packForm = null, lotDone = null, labelFor = null, repJenis = 'form17', repBulan = '', repData = null;
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
 const ruteLabel = r => r || 'Belum ada rute';
@@ -248,7 +251,7 @@ async function load(fresh) {
       api({ action: 'adminShipments', staffId: auth.staffId, pin: auth.pin, status: shipFilter, tanggal: shipDate, fresh }),
       api({ action: 'adminLots', staffId: auth.staffId, pin: auth.pin })]);
     r = a;
-    if (r.ok) { shipData = r.shipments; couriers = r.couriers; today = r.hariIni; }
+    if (r.ok) { shipData = r.shipments; couriers = r.couriers; today = r.hariIni; ruteKurir = r.ruteKurir || {}; }
     if (l.ok) lotData = l;
   } else if (view === 'kode') {
     loading('Memuat stok kode produksi…');
@@ -832,6 +835,8 @@ function renderPengiriman() {
   shipData.forEach(x => { (byDate[x.tglRencana] = byDate[x.tglRencana] || []).push(x); });
   const besok = new Date(new Date(today + 'T12:00:00+08:00').getTime() + 864e5).toISOString().slice(0, 10);
   const dayLabel = d => tgl(d) + (d === today ? ' · hari ini' : d === besok ? ' · besok' : d < today ? ' · terlambat' : '');
+  let isToday = false;
+  const ruteWho = k => { const c = ruteKurir[String(k).toLowerCase()]; return c && c.length ? ` <span class="rwho">· 🚚 ${c.map(x => esc(x.kurir) + (x.jam ? ' ' + esc(x.jam) : '')).join(', ')}</span>` : (k !== 'Belum ada rute' ? ' <span class="rwho none">· belum dipilih kurir</span>' : ''); };
   const section = list => {
     const groups = {}, order = {};
     list.slice().sort((a, b) => a.ruteUrutan - b.ruteUrutan || a.customer.localeCompare(b.customer)).forEach(x => {
@@ -840,7 +845,7 @@ function renderPengiriman() {
       order[k] = shipGroup === 'rute' ? x.ruteUrutan : (x.kurir ? 1 : 0);
     });
     return Object.keys(groups).sort((a, b) => order[a] - order[b] || a.localeCompare(b))
-      .map(k => `<p class="group-h">${esc(k)} · ${groups[k].length} pengiriman</p><div class="grid">${groups[k].map(shipCard).join('')}</div>`).join('');
+      .map(k => `<p class="group-h">${esc(k)} · ${groups[k].length} pengiriman${shipGroup === 'rute' && isToday ? ruteWho(k) : ''}</p><div class="grid">${groups[k].map(shipCard).join('')}</div>`).join('');
   };
   const dates = Object.keys(byDate).sort();
   $('#main').innerHTML = `${flash ? `<div class="alert ${flash.ok ? 'ok' : 'bad'}">${esc(flash.text)}</div>` : ''}
@@ -852,7 +857,7 @@ function renderPengiriman() {
       <button class="chip" id="reload">Muat ulang</button>
     </div>
     <div class="filters"><span class="sub">Kelompokkan:</span><button class="chip${shipGroup === 'rute' ? ' on' : ''}" data-sg="rute">Per rute</button><button class="chip${shipGroup === 'kurir' ? ' on' : ''}" data-sg="kurir">Per kurir</button></div>
-    ${dates.length ? dates.map(d => `<h3 class="date-h${d < today ? ' late' : ''}">${esc(dayLabel(d))} <span class="sub">· ${byDate[d].length} pengiriman</span></h3>${section(byDate[d])}`).join('') : '<div class="msg">Tidak ada pengiriman di sini.</div>'}
+    ${dates.length ? dates.map(d => { isToday = d === today; return `<h3 class="date-h${d < today ? ' late' : ''}">${esc(dayLabel(d))} <span class="sub">· ${byDate[d].length} pengiriman</span></h3>${section(byDate[d])}`; }).join('') : '<div class="msg">Tidak ada pengiriman di sini.</div>'}
     ${shipData.some(x => x.status === 'DIRENCANAKAN') ? `<div class="bulkbar"><span class="sub">Centang yang barangnya sudah siap, lalu tandai siap kirim sekaligus.</span><button class="btn ok" id="bulkReady" ${shipPick.size && !busy ? '' : 'disabled'}>Siap dikirim (${shipPick.size})</button></div>` : ''}
     <p class="sub" style="margin-top:18px"><b>Dalam perjalanan</b> terisi otomatis saat kurir memuat barang di aplikasi Delivery, dan <b>Terkirim</b> saat kurir men-stamp. Tombol manual hanya untuk cadangan.</p>`;
   flash = null;
