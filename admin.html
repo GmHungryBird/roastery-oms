@@ -636,6 +636,7 @@ function shipCard(x) {
     ${x.riwayat ? `<div class="hist">${esc(x.riwayat)}</div>` : ''}
     <div class="actions" data-sbox="${esc(x.id)}">
       ${next ? `<button class="btn${next[0] === 'TERKIRIM' ? ' sec' : ' ok'}" data-next="${esc(x.id)}" data-to="${next[0]}">${next[1]}</button>` : ''}
+      ${(x.status === 'DIRENCANAKAN' || x.status === 'SIAP_KIRIM') && x.tglRencana > today ? `<button class="btn sec" data-kirimhariini="${esc(x.id)}" title="Pindahkan ke jadwal hari ini supaya muncul di daftar muat kurir">Kirim hari ini</button>` : ''}
       ${!final ? `<button class="btn ghost" data-scancel="${esc(x.id)}">Batalkan</button>` : ''}
     </div></div>`;
 }
@@ -905,6 +906,7 @@ async function shipUpdate(id, extra, okText) {
     if (extra.status) { x.status = extra.status; x.statusLabel = SHIP_LABEL[extra.status] || extra.status; }
     if (extra.kurirId !== undefined) { x.kurirId = extra.kurirId; const k = couriers.find(c => c.id === extra.kurirId); x.kurir = k ? k.nama : ''; }
     if (extra.invoiceNo !== undefined) x.invoiceNo = extra.invoiceNo;
+    if (extra.tglRencana !== undefined) x.tglRencana = extra.tglRencana;
     x._pending = true; keepScroll(renderPengiriman);
   }
   let r;
@@ -981,6 +983,7 @@ document.addEventListener('click', e => {
     const pn = document.getElementById('pn-' + t.dataset.next);
     shipUpdate(t.dataset.next, { status: to, penerima: pn ? pn.value.trim() : '' }, '{id}: status diperbarui.');
   }
+  if (t.dataset.kirimhariini) { t.disabled = true; shipUpdate(t.dataset.kirimhariini, { tglRencana: today }, '{id}: dipindah ke hari ini, langsung muncul di daftar muat kurir.'); }
   if (t.dataset.saveinv) { t.disabled = true; shipUpdate(t.dataset.saveinv, { invoiceNo: document.querySelector(`[data-inv="${t.dataset.saveinv}"]`).value.trim() }, '{id}: no. invoice disimpan.'); }
   if (t.dataset.scancel) {
     const box = document.querySelector(`[data-sbox="${t.dataset.scancel}"]`);
