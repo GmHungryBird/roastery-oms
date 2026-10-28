@@ -508,7 +508,7 @@ function hitungSaran(d, urutOrder) {
   Object.keys(d.stokKode || {}).forEach(pid => { sisa[pid] = d.stokKode[pid].map(k => ({ lot: k.lot, n: k.sisa })); });
   saranMap = {};
   urutOrder.forEach(o => {
-    saranMap[o.id] = o.items.filter(i => i.sisa > 0).map(i => {
+    saranMap[o.id] = o.items.filter(i => i.sisa > 0 && !(d.nonKopi || []).includes(i.productId)).map(i => {
       let need = i.sisa; const ambil = [];
       (sisa[i.productId] || []).forEach(k => { if (need > 0 && k.n > 0) { const t = Math.min(need, k.n); ambil.push({ lot: k.lot, q: t }); k.n -= t; need -= t; } });
       return { nama: i.nama, ambil, kurang: need };
@@ -749,6 +749,7 @@ function renderKode() {
       <p class="sub" style="margin:0 0 10px">Setelah roasting/blending selesai. Sistem membuat <b>kode produksi untuk wadah itu</b>. Semua kemasan dari wadah ini memakai kode yang sama.</p>
       <label for="bj">Jenis kopi</label><select id="bj"><option value="">Pilih…</option>${d.jenis.map(j => `<option value="${esc(j.jenis)}"${j.jenis === bf.jenis ? ' selected' : ''}>${esc(j.jenis)}</option>`).join('')}</select>
       ${jsel ? `<p class="sub" style="margin:4px 0 0">Bisa dikemas jadi: ${jsel.produk.map(p => esc(p.nama)).join(', ')}</p>` : ''}
+      <p class="sub" style="margin:4px 0 0">Daftar ini dari kolom <b>Origin/Blend</b> (+ Profil Roast) di tab Products. Produk yang Origin/Blend-nya kosong (jasa, kemasan, sewa) tidak perlu kode produksi.</p>
       <label for="bt">Tanggal roasting / blend</label><input type="date" id="bt" value="${esc(bf.tglRoast)}" max="${esc(d.hariIni)}">
       <label for="bk">Berat di wadah (kg)</label><input id="bk" inputmode="decimal" value="${esc(bf.kg)}" placeholder="mis. 50">
       <label for="bg">Green bean dipakai (kg, opsional)</label><input id="bg" inputmode="decimal" value="${esc(bf.kgGreen)}">
