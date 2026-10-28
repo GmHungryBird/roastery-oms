@@ -59,6 +59,18 @@
   .ship .head { font-size: 13px; }
   .st-TERKIRIM { color: var(--ok); } .st-DIRENCANAKAN, .st-SIAP_KIRIM, .st-DIKIRIM { color: var(--accent); }
   .prog { color: var(--muted); font-size: 13px; }
+  .inv { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--line); margin: 0; color: var(--ink); font-size: 15px; cursor: pointer; }
+  .inv:first-of-type { border-top: 0; }
+  .inv input[type=checkbox] { width: 22px; height: 22px; margin: 1px 0 0; flex: none; accent-color: var(--accent); }
+  .inv .grow { flex: 1; }
+  .inv .amt { font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .late { color: var(--err); font-weight: 600; }
+  .tgsum { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+  .tgsum b { font-size: 20px; white-space: nowrap; }
+  .paybox { margin-top: 10px; padding: 12px; border-radius: 10px; background: var(--chip); font-size: 14px; }
+  .paybox .btn { width: 100%; margin-top: 10px; }
+  .wabtn { display: block; text-align: center; text-decoration: none; background: #1f9d55; color: #fff; border-radius: 10px; padding: 12px; font-weight: 700; margin-top: 10px; }
+  .warnbox { border-left: 3px solid var(--err); padding: 8px 12px; background: color-mix(in srgb, var(--err) 8%, transparent); border-radius: 8px; font-size: 14px; margin-bottom: 10px; }
 
   /* Warna status: kuning = masih produksi, hijau = siap kirim, biru = dalam perjalanan */
   :root { --st-prod-bg: #fff1c2; --st-prod: #7a5800; --st-siap-bg: #d9f2df; --st-siap: #1e6b3a; --st-jalan-bg: #dbe9fb; --st-jalan: #1f4f8f; --st-masuk-bg: #fde3cf; --st-masuk: #9a4a12; }
@@ -92,7 +104,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const rp = n => 'Rp ' + Number(n || 0).toLocaleString('id-ID');
 const tgl = s => { const d = new Date(String(s).slice(0, 10) + 'T00:00:00+08:00'); return isNaN(d) ? s : d.toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }); };
 const token = new URLSearchParams(location.search).get('t');
-let data = null, cart = {}, ref = null, flash = null;
+let data = null, cart = {}, ref = null, flash = null, payPick = new Set(), payRef = null, payDone = null;
 
 async function api(body) {
   try {
@@ -177,6 +189,7 @@ function renderHome() {
         <button data-inc="${esc(p.id)}" aria-label="Tambah">+</button></div></div>`).join('')
     : '<div class="sub">Katalog belum diatur. Hubungi admin.</div>';
 
+  const tagihan = tagihanHTML();
   const pesanan = data.pesanan.length ? data.pesanan.map(orderCard).join('') : '<div class="sub">Belum ada pesanan.</div>';
 
   const kiriman = data.kiriman.length
@@ -187,14 +200,58 @@ function renderHome() {
 
   $('#main').innerHTML = `
     ${flash ? `<div class="alert ${flash.ok ? 'ok' : 'err'}">${esc(flash.text)}</div>` : ''}
-    <section><h2>Pesan kopi</h2>${katalog}</section>
+    ${tagihan}
+    <section><h2>Pesan kopi</h2>${data.tagihan && data.tagihan.kredit.blokir ? `<div class="warnbox">Pemesanan sementara ditahan karena ${esc(data.tagihan.kredit.alasan)}. Silakan selesaikan tagihan di atas atau hubungi admin.</div>` : ''}${katalog}</section>
     <section><h2>Pesanan saya</h2>${pesanan}</section>
     <section><h2>Kiriman terakhir</h2>${kiriman}</section>
     <p class="note">Versi uji coba.</p>`;
   flash = null;
+  if ($('#payBtn')) $('#payBtn').onclick = konfirmasiBayar;
   $('#barBtn').textContent = 'Lanjut pesan';
   $('#barBtn').onclick = renderCheckout;
   updateBar();
+}
+
+/* ---------- Tagihan ---------- */
+const tglS = s => { const d = new Date(String(s).slice(0, 10) + 'T12:00:00+08:00'); return isNaN(d) ? s : d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }); };
+function bisaDipilih(v) { return v.invoiceNo && v.sisa - v.menunggu > 0; }
+function tagihanHTML() {
+  const T = data.tagihan;
+  if (!T || (!T.list.length && !T.menunggu.length && !T.ditolak.length && !payDone)) return '';
+  const pilih = T.list.filter(v => payPick.has(v.id));
+  const totPilih = pilih.reduce((a, v) => a + v.sisa - v.menunggu, 0);
+  return `<section id="tagihan"><h2>Tagihan</h2>
+    ${payDone ? `<div class="alert ok">Konfirmasi ${esc(payDone.id)} sebesar ${rp(payDone.total)} terkirim. Admin akan memverifikasi setelah dana masuk.</div>
+      ${payDone.waLink ? `<a class="wabtn" href="${esc(payDone.waLink)}" target="_blank" rel="noopener">Kirim pesan konfirmasi via WhatsApp</a>` : ''}<div style="height:10px"></div>` : ''}
+    ${T.kredit.lewat && !T.kredit.blokir ? `<div class="warnbox">Ada tagihan yang perlu diselesaikan (${esc(T.kredit.alasan)}). Pesanan baru tetap bisa dibuat dan akan dikonfirmasi admin.</div>` : ''}
+    ${T.list.length ? `<div class="tgsum"><span class="sub">Belum dibayar${T.telatMaks ? ` · <span class="late">ada yang telat ${T.telatMaks} hari</span>` : ''}</span><b>${rp(T.total)}</b></div>
+    ${T.list.map(v => `<label class="inv">${bisaDipilih(v) ? `<input type="checkbox" data-pay="${esc(v.id)}" ${payPick.has(v.id) ? 'checked' : ''}>` : '<span style="width:22px;flex:none"></span>'}
+      <div class="grow"><div class="name">${v.invoiceNo ? esc(v.invoiceNo) : 'Invoice sedang dibuat'}</div>
+        <div class="sub">Kirim ${esc(tglS(v.tglKirim))} · jatuh tempo ${v.telatHari ? `<span class="late">${esc(tglS(v.jatuhTempo))} (telat ${v.telatHari} hari)</span>` : esc(tglS(v.jatuhTempo))}</div>
+        ${v.terbayar ? `<div class="sub">Sudah dibayar ${rp(v.terbayar)} dari ${rp(v.total)}</div>` : ''}
+        ${v.menunggu ? `<div class="sub">${rp(v.menunggu)} menunggu verifikasi admin</div>` : ''}</div>
+      <div class="amt">${rp(v.sisa)}</div></label>`).join('')}` : '<div class="sub">Tidak ada tagihan yang belum dibayar.</div>'}
+    ${T.menunggu.length ? `<div class="sub" style="margin-top:8px">${T.menunggu.map(p => `Konfirmasi ${esc(p.id)} · ${rp(p.total)} · menunggu verifikasi`).join('<br>')}</div>` : ''}
+    ${T.ditolak.length ? `<div class="sub late" style="margin-top:8px">${T.ditolak.map(p => `Konfirmasi ${esc(p.id)} (${rp(p.total)}) ditolak: ${esc(p.alasan)}`).join('<br>')}</div>` : ''}
+    ${pilih.length ? `<div class="paybox"><div class="tgsum" style="margin:0"><span>${pilih.length} invoice dipilih</span><b>${rp(totPilih)}</b></div>
+      ${T.rekening ? `<div style="margin-top:6px">Transfer ke: <b>${esc(T.rekening)}</b></div>` : ''}
+      <label for="ttf">Tanggal transfer</label><input type="date" id="ttf" value="${esc(data.hariIni)}" max="${esc(data.hariIni)}">
+      <button class="btn" id="payBtn">Saya sudah transfer · konfirmasi</button>
+      <div class="sub" style="margin-top:6px">Setelah konfirmasi, kirim pesan WhatsApp ke admin dengan tombol yang muncul.</div></div>` : (T.list.some(bisaDipilih) ? '<div class="sub" style="margin-top:8px">Centang invoice yang sudah Anda bayar untuk konfirmasi.</div>' : '')}
+  </section>`;
+}
+async function konfirmasiBayar() {
+  const btn = $('#payBtn');
+  if (!payRef) payRef = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
+  btn.disabled = true; btn.textContent = 'Mengirim…';
+  let r;
+  try { r = await api({ action: 'customerPayConfirm', token, ref: payRef, tglTransfer: $('#ttf').value, items: [...payPick].map(id => ({ shipmentId: id })) }); }
+  catch (e) { r = { ok: false, error: 'Koneksi terputus. Coba lagi; konfirmasi tidak akan tercatat dobel.' }; }
+  if (!r.ok) { btn.disabled = false; btn.textContent = 'Saya sudah transfer · konfirmasi'; alertTop(r.error); return; }
+  payDone = { id: r.konfirmasi.id, total: r.konfirmasi.total, waLink: r.waLink };
+  payPick = new Set(); payRef = null;
+  await load();
+  const el = document.getElementById('tagihan'); if (el) el.scrollIntoView();
 }
 
 function renderCheckout() {
@@ -250,6 +307,9 @@ document.addEventListener('click', async e => {
     flash = r.ok ? { ok: true, text: 'Pesanan ' + t.dataset.cancel + ' dibatalkan.' } : { ok: false, text: r.error };
     await load();
   }
+});
+document.addEventListener('change', e => {
+  if (e.target.dataset.pay) { e.target.checked ? payPick.add(e.target.dataset.pay) : payPick.delete(e.target.dataset.pay); payDone = null; const y = window.scrollY; renderHome(); window.scrollTo(0, y); }
 });
 document.addEventListener('input', e => { if (e.target.dataset.id) setQty(e.target.dataset.id, e.target.value); });
 
