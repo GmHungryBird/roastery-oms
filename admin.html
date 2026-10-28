@@ -249,6 +249,14 @@ function renderLogin(err) {
 
 function logout() { auth = null; store.del('oms_admin'); renderLogin(); }
 
+/* Tombol Muat ulang: tampilkan proses & hasil supaya terlihat bekerja (data sering tidak berubah) */
+async function muatUlang(e) {
+  const b = e && e.currentTarget; if (b) { b.disabled = true; b.textContent = 'Memuat…'; }
+  let ok;
+  try { ok = await load(true); } catch (err) { ok = false; flash = { ok: false, text: 'Tidak bisa terhubung ke server. Periksa koneksi lalu coba lagi.' }; render(); }
+  const jam = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+  if (ok !== false && !flash) { const el = document.getElementById('reload'); if (el) { el.textContent = '✓ Diperbarui ' + jam; setTimeout(() => { if (el.isConnected) el.textContent = 'Muat ulang'; }, 4000); } }
+}
 async function load(fresh) {
   if (!auth) return renderLogin();
   fresh = fresh === true;
@@ -293,8 +301,9 @@ async function load(fresh) {
     r = await api({ action: 'adminOrders', staffId: auth.staffId, pin: auth.pin, fresh });
     if (r.ok) { all = r.orders; today = r.hariIni; }
   }
-  if (!r.ok) { if (/PIN|Staff tidak/.test(r.error)) return logout(); $('#main').innerHTML = `<div class="msg err">${esc(r.error)}</div>`; return; }
+  if (!r.ok) { if (/PIN|Staff tidak/.test(r.error)) return logout(); $('#main').innerHTML = `<div class="msg err">${esc(r.error)}</div>`; return false; }
   render();
+  return true;
 }
 
 function renderTabs() {
@@ -370,7 +379,7 @@ function render() {
     ${list.length ? `<div class="grid">${list.map(card).join('')}</div>` : '<div class="msg">Tidak ada pesanan di sini.</div>'}`;
   flash = null;
   $('#q').oninput = e => { q = e.target.value; const pos = e.target.selectionStart; render(); const i = $('#q'); i.focus(); i.setSelectionRange(pos, pos); };
-  $('#reload').onclick = () => load(true);
+  $('#reload').onclick = muatUlang;
   if ($('#newOrder')) $('#newOrder').onclick = () => openForm(null);
 }
 
@@ -553,7 +562,7 @@ function renderProduksi() {
       <button class="btn ok" id="bulkShip" ${prodPick.size && !busy ? '' : 'disabled'}>${busy ? 'Menyimpan…' : 'Siap kirim (' + prodPick.size + ')'}</button></div>` : ''}`;
   flash = null;
   if ($('#bulkShip')) $('#bulkShip').onclick = bulkShip;
-  $('#reload').onclick = () => load(true);
+  $('#reload').onclick = muatUlang;
 }
 
 async function bulkShip() {
@@ -781,7 +790,7 @@ function renderKode() {
     $('#savePack').onclick = savePack;
   }
   $('#saveBatch').onclick = saveBatch;
-  $('#reload').onclick = () => load(true);
+  $('#reload').onclick = muatUlang;
 }
 
 async function saveBatch() {
@@ -921,7 +930,7 @@ function renderTagihan() {
   $('#main').innerHTML = `${flash ? `<div class="alert ${flash.ok ? 'ok' : 'bad'}">${esc(flash.text)}</div>` : ''}
     <div class="filters">${chips.map(([k, l, n]) => `<button class="chip${tgView === k ? ' on' : ''}" data-tgv="${k}">${l}${n !== '' ? ' <b>' + n + '</b>' : ''}</button>`).join('')}<span class="grow"></span><button class="chip" id="reload">Muat ulang</button></div>${body}`;
   flash = null;
-  $('#reload').onclick = () => load(true);
+  $('#reload').onclick = muatUlang;
   if ($('#csvPiutang')) $('#csvPiutang').onclick = () => unduhCsv('Piutang_' + today + '.csv', ['Customer', 'ID Customer', 'No Invoice', 'ID Pengiriman', 'Tgl Kirim', 'Jatuh Tempo', 'Telat (hari)', 'Total', 'Terbayar', 'Sisa'],
     I.piutang.flatMap(g => g.invoices.map(v => [g.customer, g.customerId, v.invoiceNo, v.id, v.tglKirim, v.jatuhTempo, v.telatHari, v.total, v.terbayar, v.sisa])));
   if ($('#csvBayar')) $('#csvBayar').onclick = () => unduhCsv('Pembayaran_' + today + '.csv', ['ID', 'Tgl', 'Customer', 'Invoice', 'Jumlah', 'Metode', 'Status', 'Diverifikasi oleh', 'Catatan'],
@@ -982,7 +991,7 @@ function renderLaporan() {
       ${d.rows.map(r => `<tr>${cols.map(c => `<td${c[2] ? ' class="num"' : ''}>${c[0] === 'kode' && !String(r.kode).match(/^[A-Z0-9]/) ? `<span class="lotnone">${esc(r.kode)}</span>` : esc(r[c[0]] ?? '')}</td>`).join('')}</tr>`).join('')}</table></div>` : '<div class="msg">Belum ada data di bulan ini.</div>'}`;
   flash = null;
   $('#rbulan').onchange = e => { if (e.target.value) { repBulan = e.target.value; load(); } };
-  $('#reload').onclick = () => load(true);
+  $('#reload').onclick = muatUlang;
   $('#cetak').onclick = () => window.print();
   $('#csv').onclick = () => {
     const q = v => { const t = String(v ?? ''); return /[",\n;]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
@@ -1027,7 +1036,7 @@ function renderPengiriman() {
     <p class="sub" style="margin-top:18px"><b>Dalam perjalanan</b> terisi otomatis saat kurir memuat barang di aplikasi Delivery, dan <b>Terkirim</b> saat kurir men-stamp. Tombol manual hanya untuk cadangan.</p>`;
   flash = null;
   if ($('#bulkReady')) $('#bulkReady').onclick = bulkReady;
-  $('#reload').onclick = () => load(true);
+  $('#reload').onclick = muatUlang;
   $('#sdate').onchange = e => { shipDate = e.target.value; load(); };
 }
 
