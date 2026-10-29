@@ -139,6 +139,8 @@
   .rep td.num, .rep th.num { text-align: right; }
   .tblwrap { overflow-x: auto; }
   .printonly { display: none; }
+  .mobonly { display: none; }
+  @media (max-width: 600px) { .mobonly { display: block; } }
   .kcard h2 { display: flex; gap: 10px; align-items: center; }
   .stepno { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--ink); color: #fff; font-size: 15px; flex: none; }
   .packrow { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
@@ -183,6 +185,36 @@
   .card.order.bd-DIRENCANAKAN { border-left: 4px solid #e8b923; }
   .card.order.bd-SIAP_KIRIM { border-left: 4px solid #2f9a55; }
   .card.order.bd-DIKIRIM { border-left: 4px solid #3b78c4; }
+
+  /* ===== Tampilan HP (layar sempit): semua bisa dipakai tanpa memutar layar ===== */
+  @media (max-width: 600px) {
+    header { padding: 10px 12px; }
+    header h1 { font-size: 17px; }
+    main { padding-left: 12px; padding-right: 12px; }
+    nav#tabs { flex-wrap: wrap; overflow: visible; gap: 2px 0; padding: 8px 8px 0; }
+    nav#tabs .tab { padding: 8px 4px; font-size: 14px; flex: 0 0 33.33%; text-align: center; }
+    .filters { gap: 6px; margin-bottom: 10px; }
+    .chip { padding: 5px 10px; font-size: 12.5px; }
+    .filters input[type=date] { max-width: 150px !important; }
+    .filters input:not([type]) , .filters input[type=search] { flex: 1 1 100%; }
+    .grid { grid-template-columns: 1fr; gap: 10px; }
+    .card { padding: 12px; }
+    .btn { padding: 9px 14px; }
+    /* Produksi: tombol Sebagian pindah ke bawah, isi pesanan dapat lebar penuh */
+    .row:has(.ckrow) { flex-wrap: wrap; align-items: flex-start; }
+    .row:has(.ckrow) .ckrow { flex: 1 1 100%; align-items: flex-start; }
+    .row:has(.ckrow) > .btn { margin-left: 36px; padding: 6px 12px; font-size: 13px; }
+    .tbl td, .tbl th { padding: 6px 4px; }
+    /* Bar Siap kirim di bawah: ringkas */
+    .bulkbar { padding: 8px 0; }
+    .bulkbar .sub { display: none; }
+    .bulkbar .btn { flex: 1; }
+    .savebar { gap: 8px; }
+    .date-h { font-size: 16px; }
+    .inline input, .inline select { min-width: 0; flex: 1 1 auto; }
+    .tiles { grid-template-columns: 1fr 1fr; }
+    .tile .v { font-size: 16px; }
+  }
 </style>
 </head>
 <body>
@@ -988,7 +1020,7 @@ function renderLaporan() {
     <h3>${esc(REP_TITLE[repJenis])}</h3>
     <p class="sub">${esc(bulanLabel)} · ${d.rows.length} baris${repJenis === 'form17' ? ' · barang yang sudah keluar gudang (Dalam perjalanan / Terkirim). No. surat jalan = ID pengiriman, paraf = kurir.' : ' · dari catatan hasil kemas.'}</p>
     ${d.tanpaKode ? `<div class="warnbox noprint"><b>${d.tanpaKode} baris belum ada kode produksi.</b> Catat hasil kemas untuk produk itu di tab Kode produksi, lalu pilih kodenya di kartu pengiriman.</div>` : ''}
-    ${d.rows.length ? `<div class="tblwrap"><table class="rep"><tr>${cols.map(c => `<th${c[2] ? ' class="num"' : ''}>${esc(c[1])}</th>`).join('')}</tr>
+    ${d.rows.length ? `<p class="sub mobonly noprint">Geser tabel ke samping untuk melihat semua kolom.</p><div class="tblwrap"><table class="rep"><tr>${cols.map(c => `<th${c[2] ? ' class="num"' : ''}>${esc(c[1])}</th>`).join('')}</tr>
       ${d.rows.map(r => `<tr>${cols.map(c => `<td${c[2] ? ' class="num"' : ''}>${c[0] === 'kode' && !String(r.kode).match(/^[A-Z0-9]/) ? `<span class="lotnone">${esc(r.kode)}</span>` : esc(r[c[0]] ?? '')}</td>`).join('')}</tr>`).join('')}</table></div>` : '<div class="msg">Belum ada data di bulan ini.</div>'}`;
   flash = null;
   $('#rbulan').onchange = e => { if (e.target.value) { repBulan = e.target.value; load(); } };
