@@ -128,6 +128,9 @@
   .barlbl { display: flex; gap: 4px; font-size: 10px; color: var(--muted); }
   .barlbl span { flex: 1; text-align: center; }
   .linkish { background: none; border: 0; padding: 0; font: inherit; color: var(--ink); cursor: pointer; text-align: left; }
+  .loktag { display: inline-block; font-size: 11.5px; font-weight: 600; border-radius: 999px; padding: 1px 8px; background: var(--st-prod-bg); color: var(--st-prod); }
+  .loktag.ok { background: var(--st-siap-bg); color: var(--st-siap); }
+  .row.done { opacity: .75; }
   .lotline { font-size: 13px; color: var(--muted); margin: 2px 0 4px 14px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
   .lotline select { font-size: 13px; padding: 3px 6px; max-width: 220px; }
   .lotcode { font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 600; color: var(--ink); }
@@ -239,7 +242,7 @@ const store = { get(k) { try { return sessionStorage.getItem(k); } catch (e) { r
 let auth = null, all = [], filter = 'MASUK', q = '', flash = null, today = '', view = 'pesanan';
 let prodData = null, shipData = null, couriers = [], shipFilter = 'AKTIF', shipDate = '', shipForm = null, shipGroup = 'rute';
 let prodPick = new Set(), shipPick = new Set(), busy = false;
-let ruteKurir = {};
+let ruteKurir = {}, prodLok = null, lokUtama = 'Anggrek';
 let tgView = 'belum', tgInv = null, tgPay = null, tgBadge = 0, tgOpen = null, tgForm = null;
 let lotData = null, batchForm = null, packForm = null, lotDone = null, labelFor = null, repJenis = 'form17', repBulan = '', repData = null;
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
@@ -272,7 +275,7 @@ function renderLogin(err) {
     const a = { staffId: $('#sid').value.trim(), pin: $('#pin').value.trim() };
     const r = await api(Object.assign({ action: 'adminLogin' }, a));
     if (!r.ok) return renderLogin(r.error);
-    auth = Object.assign(a, { nama: r.staff.nama, peran: r.staff.peran });
+    auth = Object.assign(a, { nama: r.staff.nama, peran: r.staff.peran, lokasi: r.staff.lokasi || '' });
     store.set('oms_admin', JSON.stringify(auth));
     view = isAdmin() ? 'pesanan' : canShip() ? 'produksi' : 'pesanan';
     load();
@@ -292,10 +295,10 @@ async function muatUlang(e) {
 async function load(fresh) {
   if (!auth) return renderLogin();
   fresh = fresh === true;
-  if (!auth.peran) {
+  if (!auth.peran || auth.lokasi === undefined) {
     const r = await api({ action: 'adminLogin', staffId: auth.staffId, pin: auth.pin });
     if (!r.ok) return logout();
-    auth.peran = r.staff.peran; store.set('oms_admin', JSON.stringify(auth));
+    auth.peran = r.staff.peran; auth.lokasi = r.staff.lokasi || ''; store.set('oms_admin', JSON.stringify(auth));
   }
   $('#who').innerHTML = `<span class="who">${esc(auth.nama)} · ${esc(auth.peran)}</span> <button id="out">Keluar</button>`;
   $('#out').onclick = logout;
@@ -312,7 +315,7 @@ async function load(fresh) {
       api({ action: 'adminShipments', staffId: auth.staffId, pin: auth.pin, status: shipFilter, tanggal: shipDate, fresh }),
       api({ action: 'adminLots', staffId: auth.staffId, pin: auth.pin })]);
     r = a;
-    if (r.ok) { shipData = r.shipments; couriers = r.couriers; today = r.hariIni; ruteKurir = r.ruteKurir || {}; }
+    if (r.ok) { shipData = r.shipments; couriers = r.couriers; today = r.hariIni; ruteKurir = r.ruteKurir || {}; lokUtama = r.lokasiUtama || lokUtama; }
     if (l.ok) lotData = l;
   } else if (view === 'kode') {
     loading('Memuat stok kode produksi…');
@@ -540,7 +543,7 @@ function hitungSaran(d, urutOrder) {
   Object.keys(d.stokKode || {}).forEach(pid => { sisa[pid] = d.stokKode[pid].map(k => ({ lot: k.lot, n: k.sisa })); });
   saranMap = {};
   urutOrder.forEach(o => {
-    saranMap[o.id] = o.items.filter(i => i.sisa > 0 && !(d.nonKopi || []).includes(i.productId)).map(i => {
+    saranMap[o.id] = o.items.filter(i => i.sisa > 0 && !(d.nonKopi || []).includes(i.productId) && (!prodLok || i.lokasi === prodLok)).map(i => {
       let need = i.sisa; const ambil = [];
       (sisa[i.productId] || []).forEach(k => { if (need > 0 && k.n > 0) { const t = Math.min(need, k.n); ambil.push({ lot: k.lot, q: t }); k.n -= t; need -= t; } });
       return { nama: i.nama, ambil, kurang: need };
@@ -555,8 +558,13 @@ function saranHTML(o) {
 
 function renderProduksi() {
   const d = prodData;
+  if (prodLok === null) prodLok = (auth.lokasi && (d.lokasiList || []).includes(auth.lokasi)) ? auth.lokasi : '';
+  const multi = (d.lokasiList || []).length > 1;
+  const L = multi ? prodLok : '';
+  // Item yang masih harus dikerjakan di lokasi ini
+  const mine = o => o.items.filter(i => i.sisa > 0 && (!L || i.lokasi === L));
   const ordersById = {};
-  d.orders.forEach(o => { ordersById[o.id] = o; });
+  d.orders.forEach(o => { if (mine(o).length) ordersById[o.id] = o; });
   const urutSemua = [];
   d.hari.forEach(h => {
     const ids = [...new Set(h.produk.flatMap(p => p.rincian.map(r => r.orderId)))];
@@ -566,8 +574,10 @@ function renderProduksi() {
   urutIds = urutSemua.map(o => o.id);
   const days = d.hari.map(h => {
     const telat = h.tanggal < today;
-    const rows = h.produk.map(p => `<tr><td><b>${esc(p.nama)}</b><div class="who-list">${p.rincian.map(r => `${esc(r.customer)} ${r.qty}`).join(' · ')}</div>${(d.stokKode[p.productId] || []).length ? `<div class="who-list">Stok berkode: ${d.stokKode[p.productId].map(k => `<span class="lotcode">${esc(k.lot)}</span> ${k.sisa}`).join(' · ')}</div>` : ''}</td><td class="num">${p.qty}</td><td class="num" style="color:${(p.stok || 0) >= p.qty ? 'var(--ok)' : 'var(--warn)'}">${p.stok || 0}</td></tr>`).join('');
-    const oids = [...new Set(h.produk.flatMap(p => p.rincian.map(r => r.orderId)))];
+    const prods = h.produk.filter(p => !L || p.lokasi === L);
+    if (!prods.length) return '';
+    const rows = prods.map(p => `<tr><td><b>${esc(p.nama)}</b><div class="who-list">${p.rincian.map(r => `${esc(r.customer)} ${r.qty}`).join(' · ')}</div>${multi && !L ? ` <span class="loktag">${esc(p.lokasi)}</span>` : ''}${(d.stokKode[p.productId] || []).length ? `<div class="who-list">Stok berkode: ${d.stokKode[p.productId].map(k => `<span class="lotcode">${esc(k.lot)}</span> ${k.sisa}`).join(' · ')}</div>` : ''}</td><td class="num">${p.qty}</td><td class="num" style="color:${(p.stok || 0) >= p.qty ? 'var(--ok)' : 'var(--warn)'}">${p.stok || 0}</td></tr>`).join('');
+    const oids = [...new Set(prods.flatMap(p => p.rincian.map(r => r.orderId)))];
     const list = oids.map(id => ordersById[id]).filter(Boolean).sort((a, b) => a.ruteUrutan - b.ruteUrutan || a.customer.localeCompare(b.customer));
     let lastR = null;
     const ords = list.map(o => {
@@ -575,9 +585,18 @@ function renderProduksi() {
       const head = o.rute !== lastR ? `<div class="rute-h"><input type="checkbox" class="ck" data-poall="${esc(grp.join(','))}" ${grp.every(id => prodPick.has(id)) ? 'checked' : ''} title="Pilih semua di rute ini">${ruteTag(o)}${o.ruteHari ? `<span class="sub">${esc(o.ruteHari)}</span>` : ''}</div>` : '';
       lastR = o.rute;
       const on = prodPick.has(o.id);
+      const lain = multi ? [...new Set(o.items.filter(i => i.sisa > 0 && L && i.lokasi !== L).map(i => i.lokasi))] : [];
+      const sudah = L && (o.siapLokasi || []).includes(L);
+      const lokInfo = multi ? [...new Set(o.items.filter(i => i.sisa > 0).map(i => i.lokasi))].filter(x => x !== L)
+        .map(x => (o.siapLokasi || []).includes(x) ? `<span class="loktag ok">✓ ${esc(x)} siap</span>` : `<span class="loktag">menunggu ${esc(x)}</span>`).join(' ') : '';
+      if (sudah) return head + `<div class="row done"><div style="padding-left:36px"><div class="name">${esc(o.customer)}</div>
+        <div class="sub">${esc(o.id)} · ${mine(o).map(i => i.sisa + '× ' + esc(i.nama)).join(', ')}</div>
+        <div class="sub"><span class="loktag ok">✓ Sudah siap di ${esc(L)}</span> ${lokInfo}</div></div></div>`;
       return head + `<div class="row${on ? ' picked' : ''}"><label class="ckrow"><input type="checkbox" class="ck" data-po="${esc(o.id)}" ${on ? 'checked' : ''}>
         <div><div class="name">${esc(o.customer)}</div>
-        <div class="sub">${esc(o.id)} · ${o.items.filter(i => i.sisa > 0).map(i => i.sisa + '× ' + esc(i.nama)).join(', ')}</div>${saranHTML(o)}</div></label>
+        <div class="sub">${esc(o.id)} · ${mine(o).map(i => i.sisa + '× ' + esc(i.nama)).join(', ')}</div>
+        ${lain.length ? `<div class="sub">+ ${o.items.filter(i => i.sisa > 0 && i.lokasi !== L).map(i => i.sisa + '× ' + esc(i.nama) + ' (' + esc(i.lokasi) + ')').join(', ')}</div>` : ''}
+        ${lokInfo ? `<div class="sub">${lokInfo}</div>` : ''}${saranHTML(o)}</div></label>
         <button class="btn sec" data-ship="${esc(o.id)}" title="Kirim sebagian / atur detail">Sebagian…</button></div>`;
     }).join('');
     return `<div class="day card">
@@ -585,12 +604,14 @@ function renderProduksi() {
       <table class="tbl"><tr><th>Produk & customer</th><th class="num">Qty</th><th class="num" title="Stok dari kode produksi yang sudah dikemas">Stok</th></tr>${rows}</table>
       <p class="group-h">Centang pesanan yang barangnya sudah siap, per rute</p><p class="sub" style="margin:-4px 0 8px">Ambil kemasan sesuai <b>kode</b> yang tertulis di bawah tiap pesanan. Kode yang tercatat di pengiriman mengikuti saran ini.</p>${ords}</div>`;
   }).join('');
+  const lokChips = multi ? `<div class="filters"><span class="sub">Lokasi kemas:</span>${[''].concat(d.lokasiList).map(x => `<button class="chip${prodLok === x ? ' on' : ''}" data-plok="${esc(x)}">${esc(x || 'Semua')}</button>`).join('')}</div>` : '';
   $('#main').innerHTML = `${flash ? `<div class="alert ${flash.ok ? 'ok' : 'bad'}">${esc(flash.text)}</div>` : ''}
+    ${lokChips}
     <div class="filters"><div class="sub grow">Qty yang <b>belum dijadwalkan kirim</b> dari pesanan yang sudah divalidasi, per tanggal kirim yang diminta.</div><button class="chip" id="reload">Muat ulang</button></div>
     ${d.customerTanpaRute && d.customerTanpaRute.length ? `<div class="warnbox"><b>Belum ada rute:</b> ${d.customerTanpaRute.map(esc).join(', ')}. Isi kolom <b>Area</b> customer ini di tab Customer sheet stamp.</div>` : ''}
     ${d.ruteBelumDiatur && d.ruteBelumDiatur.length ? `<div class="warnbox"><b>Rute belum diatur:</b> ${d.ruteBelumDiatur.map(esc).join(', ')}. Cek ejaannya, atau isi kurir/hari di tab <b>Rute</b> sheet OMS (rute baru masuk otomatis tiap jam).</div>` : ''}
     ${days || '<div class="msg">Tidak ada pekerjaan. Semua pesanan yang divalidasi sudah dijadwalkan kirim.</div>'}
-    ${days ? `<div class="bulkbar"><span class="sub">Barang yang dicentang langsung <b>Siap dikirim</b> (seluruh sisa). Kurir memilih sendiri saat memuat. Kirim sebagian: tombol <b>Sebagian…</b></span>
+    ${days ? `<div class="bulkbar"><span class="sub">${L ? `Centang = barang <b>${esc(L)}</b> sudah siap. Pesanan campuran jadi Siap dikirim setelah lokasi lain juga siap.` : 'Barang yang dicentang langsung <b>Siap dikirim</b> (seluruh sisa).'} Kurir memilih sendiri saat memuat. Kirim sebagian: tombol <b>Sebagian…</b></span>
       <button class="btn ok" id="bulkShip" ${prodPick.size && !busy ? '' : 'disabled'}>${busy ? 'Menyimpan…' : 'Siap kirim (' + prodPick.size + ')'}</button></div>` : ''}`;
   flash = null;
   if ($('#bulkShip')) $('#bulkShip').onclick = bulkShip;
@@ -606,12 +627,13 @@ async function bulkShip() {
   prodData.hari = prodData.hari.filter(h => h.produk.length);
   prodPick = new Set(); busy = true; keepScroll(renderProduksi);
   let r;
-  try { r = await api({ action: 'adminBulkShip', staffId: auth.staffId, pin: auth.pin, ref: uid(), orderIds: ids }); }
+  try { r = await api({ action: 'adminBulkShip', staffId: auth.staffId, pin: auth.pin, ref: uid(), orderIds: ids, lokasi: ((prodData.lokasiList || []).length > 1 && prodLok) || '' }); }
   catch (e) { r = { ok: false, error: 'Koneksi terputus. Coba lagi; tidak akan tercatat dobel.' }; }
   busy = false;
   if (!r.ok) { prodData = JSON.parse(before); ids.forEach(id => prodPick.add(id)); flash = { ok: false, text: r.error }; return keepScroll(renderProduksi); }
   const bad = r.results.filter(x => !x.ok);
-  flash = { ok: !bad.length, text: r.berhasil + ' pesanan siap dikirim.' + (bad.length ? ' Gagal: ' + bad.map(x => x.orderId + ' (' + x.error + ')').join(', ') : ' Kurir bisa langsung memuatnya.') };
+  const tunggu = r.results.filter(x => x.ok && x.menunggu);
+  flash = { ok: !bad.length, text: (r.berhasil - tunggu.length) + ' pesanan siap dikirim.' + (tunggu.length ? ' ' + tunggu.length + ' pesanan menunggu ' + [...new Set(tunggu.flatMap(x => x.menunggu))].join(' & ') + ' menyiapkan bagiannya.' : '') + (bad.length ? ' Gagal: ' + bad.map(x => x.orderId + ' (' + x.error + ')').join(', ') : '') };
   load();
 }
 const keepScroll = fn => { const y = window.scrollY; fn(); window.scrollTo(0, y); };
@@ -695,7 +717,7 @@ function shipCard(x) {
     <div class="head"><label class="ckrow">${x.status === 'DIRENCANAKAN' ? `<input type="checkbox" class="ck" data-sp="${esc(x.id)}" ${on ? 'checked' : ''}>` : ''}<span class="name">${esc(x.customer)}</span></label><span class="status st-${esc(x.status)}">${esc(x.statusLabel)}</span></div>
     <div class="sub">${esc(x.id)} · ${esc(x.orderId)} · ${esc(tgl(x.tglRencana))}</div>
     <div style="margin:2px 0">${ruteTag(x)}${shipGroup === 'rute' && x.kurir ? ` <span class="sub">${esc(x.kurir)}</span>` : ''}</div>
-    <div class="items">${x.items.map(i => `<div><span>${i.qty} × ${esc(i.nama)}</span></div>${lotLine(x, i)}`).join('')}</div>
+    <div class="items">${x.items.map(i => `<div><span>${i.qty} × ${esc(i.nama)}${i.lokasi && i.lokasi !== lokUtama ? ` <span class="loktag">ambil di ${esc(i.lokasi)}</span>` : ''}</span></div>${lotLine(x, i)}`).join('')}</div>
     <div class="total"><span>Total</span><span>${rp(x.total)}</span></div>
     ${x.status === 'TERKIRIM' ? `<div class="sub" style="margin-top:6px">Terkirim ${esc(x.waktuTerkirim)}${x.penerima ? ' · diterima ' + esc(x.penerima) : ''}<br>${esc(x.sumber)}</div>` : ''}
     ${x.catatan ? `<div class="sub">Catatan: ${esc(x.catatan)}</div>` : ''}
@@ -741,10 +763,16 @@ async function setLot(shipId, itemId, lotId, sel) {
 const fmtD = d => d ? d.slice(8, 10) + '-' + d.slice(5, 7) + '-' + d.slice(0, 4) : '';
 const netto = g => !g ? '1 kg' : g >= 1000 ? (g / 1000) + ' kg' : g + ' g';
 function renderKode() {
-  const d = lotData;
+  let d = lotData;
   if (!batchForm) batchForm = { ref: uid(), jenis: '', tglRoast: d.hariIni, kg: '', kgGreen: '', catatan: '' };
   if (!packForm) packForm = { ref: uid(), lotId: '', tglKemas: d.hariIni, qty: {}, habis: false, catatan: '' };
   const bf = batchForm, pf = packForm;
+  // Staff dengan lokasi hanya melihat jenis kopi yang dikemas di lokasinya
+  if (auth.lokasi && (d.lokasiList || []).length > 1) {
+    const jen = d.jenis.filter(j => (j.lokasi || []).includes(auth.lokasi));
+    const set = new Set(jen.map(j => j.jenis));
+    d = Object.assign({}, d, { jenis: jen, batches: d.batches.filter(b => set.has(b.jenis)) });
+  }
   const open = d.batches.filter(b => b.sisaKg > 0);
   if (pf.lotId && !open.some(b => b.lot === pf.lotId)) pf.lotId = '';
   const bt = open.find(b => b.lot === pf.lotId);
@@ -1134,6 +1162,7 @@ document.addEventListener('click', e => {
   if (t.dataset.ship) openShipForm(t.dataset.ship);
   if (t.dataset.sf) { shipFilter = t.dataset.sf; load(); }
   if (t.dataset.rj) { repJenis = t.dataset.rj; load(); }
+  if (t.dataset.plok !== undefined) { prodLok = t.dataset.plok; prodPick = new Set(); keepScroll(renderProduksi); }
   if (t.dataset.tgv) { tgView = t.dataset.tgv; tgForm = null; render(); }
   if (t.dataset.tgopen) { tgOpen = tgOpen === t.dataset.tgopen ? null : t.dataset.tgopen; tgForm = null; keepScroll(renderTagihan); }
   if (t.dataset.tgrecord) { tgForm = { cid: t.dataset.tgrecord, ref: uid(), pick: {}, tgl: today, metode: 'Transfer', catatan: '' }; keepScroll(renderTagihan); }
