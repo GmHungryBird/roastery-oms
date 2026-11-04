@@ -242,7 +242,7 @@ const store = { get(k) { try { return sessionStorage.getItem(k); } catch (e) { r
 let auth = null, all = [], filter = 'MASUK', q = '', flash = null, today = '', view = 'pesanan';
 let prodData = null, shipData = null, couriers = [], shipFilter = 'AKTIF', shipDate = '', shipForm = null, shipGroup = 'rute';
 let prodPick = new Set(), shipPick = new Set(), busy = false;
-let ruteKurir = {}, prodLok = null, lokUtama = 'Anggrek';
+let ruteKurir = {}, prodLok = null, lokUtama = 'Anggrek', alurPindah = true, terimaPick = new Set(), terimaOleh = '';
 let tgView = 'belum', tgInv = null, tgPay = null, tgBadge = 0, tgOpen = null, tgForm = null;
 let lotData = null, batchForm = null, packForm = null, lotDone = null, labelFor = null, repJenis = 'form17', repBulan = '', repData = null;
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
@@ -315,7 +315,7 @@ async function load(fresh) {
       api({ action: 'adminShipments', staffId: auth.staffId, pin: auth.pin, status: shipFilter, tanggal: shipDate, fresh }),
       api({ action: 'adminLots', staffId: auth.staffId, pin: auth.pin })]);
     r = a;
-    if (r.ok) { shipData = r.shipments; couriers = r.couriers; today = r.hariIni; ruteKurir = r.ruteKurir || {}; lokUtama = r.lokasiUtama || lokUtama; }
+    if (r.ok) { shipData = r.shipments; couriers = r.couriers; today = r.hariIni; ruteKurir = r.ruteKurir || {}; lokUtama = r.lokasiUtama || lokUtama; alurPindah = r.alurPindah !== false; }
     if (l.ok) lotData = l;
   } else if (view === 'kode') {
     loading('Memuat stok kode produksi…');
@@ -556,6 +556,50 @@ function saranHTML(o) {
   return `<div class="saran">${s.map(x => `<div>${esc(x.nama)}: ${x.ambil.map(a => `<span class="lotcode">${esc(a.lot)}</span> ×${a.q}`).join(' + ')}${x.kurang > 0 ? `${x.ambil.length ? ' + ' : ''}<span class="lotnone">${x.kurang} belum ada kemasan berkode</span>` : ''}</div>`).join('')}</div>`;
 }
 
+/* Status bagian lokasi lain dalam pesanan campuran */
+function lokTag(o, x, netral) {
+  const d = prodData, t = o.siapLokasi || [], U = d.lokasiUtama;
+  if (x !== U && d.alurPindah) {
+    if (t.includes(x + '>' + U)) return `<span class="loktag ok">✓ ${esc(x)} sudah di ${esc(U)}</span>`;
+    if (t.includes(x)) return `<span class="loktag">${esc(x)} siap · belum diambil</span>`;
+    return `<span class="loktag">${netral ? esc(x) : 'menunggu ' + esc(x)}</span>`;
+  }
+  return t.includes(x) ? `<span class="loktag ok">✓ ${esc(x)} siap</span>` : `<span class="loktag">${netral ? esc(x) : 'menunggu ' + esc(x)}</span>`;
+}
+/* Lokasi utama: kotak "Terima barang dari HB" */
+function terimaHTML(d, L) {
+  if (!d.alurPindah) return '';
+  const U = d.lokasiUtama, diLain = L && L !== U;
+  const list = d.orders.filter(o => (o.siapLokasi || []).some(t => t !== U && !t.includes('>') && (!diLain || t === L) && !(o.siapLokasi || []).includes(t + '>' + U)));
+  if (!list.length) return '';
+  const intro = diLain
+    ? `<h3 style="margin:0 0 4px">Siap di ${esc(L)}, menunggu diambil</h3>
+       <p class="sub" style="margin:0 0 8px">Kalau yang membawa ke ${esc(U)} adalah <b>staff / supervisor</b> (bukan kurir lewat aplikasi), centang pesanannya, isi nama yang membawa, lalu tekan <b>Sudah diambil</b>.</p>`
+    : `<h3 style="margin:0 0 4px">Barang siap di lokasi lain, belum diambil</h3>
+       <p class="sub" style="margin:0 0 8px">Biasanya <b>otomatis</b>: begitu kurir menekan <b>Sudah diambil</b> di aplikasi Delivery (atau staff ${esc(list[0] ? list[0].siapLokasi.find(t => t !== U && !t.includes('>')) : '')} mencatatnya), pesanan jadi Siap dikirim bila bagian ${esc(U)} juga siap. <b>Terima manual</b> hanya cadangan.</p>`;
+  return `<div class="card" style="margin-bottom:14px;border:2px solid #e8b923">${intro}
+    ${list.map(o => { const dari = o.siapLokasi.filter(t => t !== U && !t.includes('>')); const on = terimaPick.has(o.id);
+      return `<div class="row${on ? ' picked' : ''}"><label class="ckrow"><input type="checkbox" class="ck" data-terima="${esc(o.id)}" ${on ? 'checked' : ''}><div><div class="name">${esc(o.customer)}</div>
+        <div class="sub">${esc(o.id)} · dari ${esc(dari.join(', '))}: ${o.items.filter(i => i.sisa > 0 && dari.includes(i.lokasi)).map(i => i.sisa + '× ' + esc(i.nama)).join(', ')}</div>
+        <div class="sub">${(o.siapLokasi || []).includes(U) ? `<span class="loktag ok">✓ bagian ${esc(U)} siap</span>` : `<span class="loktag">bagian ${esc(U)} belum siap</span>`}</div></div></label></div>`; }).join('')}
+    ${diLain ? `<div class="inline"><input id="terimaOleh" placeholder="Dibawa oleh (nama), mis. ${esc(auth.nama)}" value="${esc(terimaOleh)}"></div>` : ''}
+    <div class="actions"><button class="btn ${diLain ? 'ok' : 'sec'}" id="terimaBtn" ${terimaPick.size && !busy ? '' : 'disabled'}>${diLain ? 'Sudah diambil' : 'Terima manual'} (${terimaPick.size})</button></div></div>`;
+}
+async function terimaLokasi() {
+  const ids = [...terimaPick]; if (!ids.length || busy) return;
+  const olehEl = document.getElementById('terimaOleh');
+  if (olehEl) { terimaOleh = olehEl.value.trim(); if (!terimaOleh) { olehEl.placeholder = 'Isi nama yang membawa barang'; olehEl.focus(); return; } }
+  busy = true; $('#terimaBtn').disabled = true; $('#terimaBtn').textContent = 'Menyimpan…';
+  let r;
+  try { r = await api({ action: 'adminTerimaLokasi', staffId: auth.staffId, pin: auth.pin, ref: uid(), orderIds: ids, oleh: olehEl ? terimaOleh : '' }); }
+  catch (e) { r = { ok: false, error: 'Koneksi terputus. Coba lagi.' }; }
+  busy = false; terimaPick = new Set();
+  if (!r.ok) { flash = { ok: false, text: r.error }; return load(); }
+  const kirim = r.results.filter(x => x.shipmentId).length, tunggu = r.results.filter(x => x.ok && x.menunggu).length, bad = r.results.filter(x => !x.ok);
+  flash = { ok: !bad.length, text: (olehEl ? 'Dicatat sudah diambil ' + terimaOleh + '. ' : 'Barang diterima. ') + (kirim ? kirim + ' pesanan langsung Siap dikirim. ' : '') + (tunggu ? tunggu + ' pesanan menunggu bagian ' + prodData.lokasiUtama + ' siap.' : '') + (bad.length ? ' Gagal: ' + bad.map(x => x.orderId + ' (' + x.error + ')').join(', ') : '') };
+  load();
+}
+
 function renderProduksi() {
   const d = prodData;
   if (prodLok === null) prodLok = (auth.lokasi && (d.lokasiList || []).includes(auth.lokasi)) ? auth.lokasi : '';
@@ -587,11 +631,12 @@ function renderProduksi() {
       const on = prodPick.has(o.id);
       const lain = multi ? [...new Set(o.items.filter(i => i.sisa > 0 && L && i.lokasi !== L).map(i => i.lokasi))] : [];
       const sudah = L && (o.siapLokasi || []).includes(L);
-      const lokInfo = multi ? [...new Set(o.items.filter(i => i.sisa > 0).map(i => i.lokasi))].filter(x => x !== L)
-        .map(x => (o.siapLokasi || []).includes(x) ? `<span class="loktag ok">✓ ${esc(x)} siap</span>` : `<span class="loktag">menunggu ${esc(x)}</span>`).join(' ') : '';
+      const lokOrder = [...new Set(o.items.filter(i => i.sisa > 0).map(i => i.lokasi))];
+      const lokInfo = !multi ? '' : !L ? (lokOrder.length > 1 ? lokOrder.map(x => lokTag(o, x, true)).join(' ') : '')
+        : lokOrder.filter(x => x !== L).map(x => lokTag(o, x, false)).join(' ');
       if (sudah) return head + `<div class="row done"><div style="padding-left:36px"><div class="name">${esc(o.customer)}</div>
         <div class="sub">${esc(o.id)} · ${mine(o).map(i => i.sisa + '× ' + esc(i.nama)).join(', ')}</div>
-        <div class="sub"><span class="loktag ok">✓ Sudah siap di ${esc(L)}</span> ${lokInfo}</div></div></div>`;
+        <div class="sub"><span class="loktag ok">✓ Sudah siap di ${esc(L)}</span> ${L !== d.lokasiUtama && d.alurPindah ? ((o.siapLokasi || []).includes(L + '>' + d.lokasiUtama) ? `<span class="loktag ok">✓ sudah diambil ke ${esc(d.lokasiUtama)}</span>` : `<span class="loktag">menunggu diambil</span>`) : ''} ${lokInfo}</div></div></div>`;
       return head + `<div class="row${on ? ' picked' : ''}"><label class="ckrow"><input type="checkbox" class="ck" data-po="${esc(o.id)}" ${on ? 'checked' : ''}>
         <div><div class="name">${esc(o.customer)}</div>
         <div class="sub">${esc(o.id)} · ${mine(o).map(i => i.sisa + '× ' + esc(i.nama)).join(', ')}</div>
@@ -607,20 +652,27 @@ function renderProduksi() {
   const lokChips = multi ? `<div class="filters"><span class="sub">Lokasi kemas:</span>${[''].concat(d.lokasiList).map(x => `<button class="chip${prodLok === x ? ' on' : ''}" data-plok="${esc(x)}">${esc(x || 'Semua')}</button>`).join('')}</div>` : '';
   $('#main').innerHTML = `${flash ? `<div class="alert ${flash.ok ? 'ok' : 'bad'}">${esc(flash.text)}</div>` : ''}
     ${lokChips}
+    ${multi ? terimaHTML(d, L) : ''}
     <div class="filters"><div class="sub grow">Qty yang <b>belum dijadwalkan kirim</b> dari pesanan yang sudah divalidasi, per tanggal kirim yang diminta.</div><button class="chip" id="reload">Muat ulang</button></div>
     ${d.customerTanpaRute && d.customerTanpaRute.length ? `<div class="warnbox"><b>Belum ada rute:</b> ${d.customerTanpaRute.map(esc).join(', ')}. Isi kolom <b>Area</b> customer ini di tab Customer sheet stamp.</div>` : ''}
     ${d.ruteBelumDiatur && d.ruteBelumDiatur.length ? `<div class="warnbox"><b>Rute belum diatur:</b> ${d.ruteBelumDiatur.map(esc).join(', ')}. Cek ejaannya, atau isi kurir/hari di tab <b>Rute</b> sheet OMS (rute baru masuk otomatis tiap jam).</div>` : ''}
     ${days || '<div class="msg">Tidak ada pekerjaan. Semua pesanan yang divalidasi sudah dijadwalkan kirim.</div>'}
-    ${days ? `<div class="bulkbar"><span class="sub">${L ? `Centang = barang <b>${esc(L)}</b> sudah siap. Pesanan campuran jadi Siap dikirim setelah lokasi lain juga siap.` : 'Barang yang dicentang langsung <b>Siap dikirim</b> (seluruh sisa).'} Kurir memilih sendiri saat memuat. Kirim sebagian: tombol <b>Sebagian…</b></span>
+    ${days ? `<div class="bulkbar"><span class="sub">${L ? (L !== d.lokasiUtama && d.alurPindah ? `Centang = barang <b>${esc(L)}</b> sudah siap. Kurir mengambilnya lewat aplikasi Delivery (Ambil di ${esc(L)}).` : `Centang = barang <b>${esc(L)}</b> sudah siap. Pesanan campuran jadi Siap dikirim setelah bagian lokasi lain sampai.`) : 'Barang yang dicentang langsung <b>Siap dikirim</b> (seluruh sisa).'} Kurir memilih sendiri saat memuat. Kirim sebagian: tombol <b>Sebagian…</b></span>
       <button class="btn ok" id="bulkShip" ${prodPick.size && !busy ? '' : 'disabled'}>${busy ? 'Menyimpan…' : 'Siap kirim (' + prodPick.size + ')'}</button></div>` : ''}`;
   flash = null;
   if ($('#bulkShip')) $('#bulkShip').onclick = bulkShip;
+  if ($('#terimaBtn')) $('#terimaBtn').onclick = terimaLokasi;
   $('#reload').onclick = muatUlang;
 }
 
 async function bulkShip() {
   // Urut sesuai daftar supaya kode yang dipakai server sama dengan saran di layar
   const ids = [...prodPick].sort((a, b) => urutIds.indexOf(a) - urutIds.indexOf(b)); if (!ids.length || busy) return;
+  // Dari tampilan "Semua": pesanan campuran dianggap siap di SEMUA lokasi. Minta konfirmasi supaya bagian HB tidak terlewat.
+  if ((prodData.lokasiList || []).length > 1 && !prodLok) {
+    const campur = ids.map(id => prodData.orders.find(o => o.id === id)).filter(o => o && new Set(o.items.filter(i => i.sisa > 0).map(i => i.lokasi)).size > 1);
+    if (campur.length && !confirm(campur.length + ' pesanan berisi barang dari beberapa lokasi:\n' + campur.map(o => '• ' + o.customer + ' (' + [...new Set(o.items.filter(i => i.sisa > 0).map(i => i.lokasi))].join(' + ') + ')').join('\n') + '\n\nMenandai dari "Semua" berarti barang di SEMUA lokasi sudah siap. Lanjut?')) return;
+  }
   // Layar langsung berubah: pesanan yang dicentang hilang dari daftar kerja, server menyusul
   const before = JSON.stringify(prodData);
   prodData.hari.forEach(h => { h.produk.forEach(p => { p.rincian = p.rincian.filter(r => !ids.includes(r.orderId)); p.qty = p.rincian.reduce((a, r) => a + r.qty, 0); }); h.produk = h.produk.filter(p => p.rincian.length); });
@@ -633,7 +685,11 @@ async function bulkShip() {
   if (!r.ok) { prodData = JSON.parse(before); ids.forEach(id => prodPick.add(id)); flash = { ok: false, text: r.error }; return keepScroll(renderProduksi); }
   const bad = r.results.filter(x => !x.ok);
   const tunggu = r.results.filter(x => x.ok && x.menunggu);
-  flash = { ok: !bad.length, text: (r.berhasil - tunggu.length) + ' pesanan siap dikirim.' + (tunggu.length ? ' ' + tunggu.length + ' pesanan menunggu ' + [...new Set(tunggu.flatMap(x => x.menunggu))].join(' & ') + ' menyiapkan bagiannya.' : '') + (bad.length ? ' Gagal: ' + bad.map(x => x.orderId + ' (' + x.error + ')').join(', ') : '') };
+  if (prodLok && prodData.alurPindah && prodLok !== prodData.lokasiUtama) {
+    flash = { ok: !bad.length, text: r.berhasil + ' pesanan siap di ' + prodLok + '. Sekarang muncul di aplikasi kurir (Ambil di ' + prodLok + ') untuk dibawa ke ' + prodData.lokasiUtama + '.' + (bad.length ? ' Gagal: ' + bad.map(x => x.orderId + ' (' + x.error + ')').join(', ') : '') };
+    return load();
+  }
+  flash = { ok: !bad.length, text: (r.berhasil - tunggu.length) + ' pesanan siap dikirim.' + (tunggu.length ? ' ' + tunggu.length + ' pesanan menunggu: ' + [...new Set(tunggu.flatMap(x => x.menunggu))].join(' & ') + '.' : '') + (bad.length ? ' Gagal: ' + bad.map(x => x.orderId + ' (' + x.error + ')').join(', ') : '') };
   load();
 }
 const keepScroll = fn => { const y = window.scrollY; fn(); window.scrollTo(0, y); };
@@ -717,7 +773,7 @@ function shipCard(x) {
     <div class="head"><label class="ckrow">${x.status === 'DIRENCANAKAN' ? `<input type="checkbox" class="ck" data-sp="${esc(x.id)}" ${on ? 'checked' : ''}>` : ''}<span class="name">${esc(x.customer)}</span></label><span class="status st-${esc(x.status)}">${esc(x.statusLabel)}</span></div>
     <div class="sub">${esc(x.id)} · ${esc(x.orderId)} · ${esc(tgl(x.tglRencana))}</div>
     <div style="margin:2px 0">${ruteTag(x)}${shipGroup === 'rute' && x.kurir ? ` <span class="sub">${esc(x.kurir)}</span>` : ''}</div>
-    <div class="items">${x.items.map(i => `<div><span>${i.qty} × ${esc(i.nama)}${i.lokasi && i.lokasi !== lokUtama ? ` <span class="loktag">ambil di ${esc(i.lokasi)}</span>` : ''}</span></div>${lotLine(x, i)}`).join('')}</div>
+    <div class="items">${x.items.map(i => `<div><span>${i.qty} × ${esc(i.nama)}${i.lokasi && i.lokasi !== lokUtama ? ` <span class="loktag">${alurPindah ? 'dari' : 'ambil di'} ${esc(i.lokasi)}</span>` : ''}</span></div>${lotLine(x, i)}`).join('')}</div>
     <div class="total"><span>Total</span><span>${rp(x.total)}</span></div>
     ${x.status === 'TERKIRIM' ? `<div class="sub" style="margin-top:6px">Terkirim ${esc(x.waktuTerkirim)}${x.penerima ? ' · diterima ' + esc(x.penerima) : ''}<br>${esc(x.sumber)}</div>` : ''}
     ${x.catatan ? `<div class="sub">Catatan: ${esc(x.catatan)}</div>` : ''}
@@ -1268,6 +1324,7 @@ document.addEventListener('input', e => {
 });
 document.addEventListener('change', e => {
   const d = e.target.dataset;
+  if (d.terima) { e.target.checked ? terimaPick.add(d.terima) : terimaPick.delete(d.terima); return keepScroll(renderProduksi); }
   if (d.po) { e.target.checked ? prodPick.add(d.po) : prodPick.delete(d.po); return keepScroll(renderProduksi); }
   if (d.poall !== undefined) { d.poall.split(',').filter(Boolean).forEach(id => e.target.checked ? prodPick.add(id) : prodPick.delete(id)); return keepScroll(renderProduksi); }
   if (d.sp) { e.target.checked ? shipPick.add(d.sp) : shipPick.delete(d.sp); return keepScroll(renderPengiriman); }
