@@ -131,6 +131,7 @@
   .loktag { display: inline-block; font-size: 11.5px; font-weight: 600; border-radius: 999px; padding: 1px 8px; background: var(--st-prod-bg); color: var(--st-prod); }
   .loktag.ok { background: var(--st-siap-bg); color: var(--st-siap); }
   .row.done { opacity: .75; }
+  .catatan { font-size: 13.5px; font-weight: 600; color: var(--ink); background: var(--st-prod-bg); border-radius: 8px; padding: 4px 8px; margin: 4px 0; display: inline-block; }
   .lotline { font-size: 13px; color: var(--muted); margin: 2px 0 4px 14px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
   .lotline select { font-size: 13px; padding: 3px 6px; max-width: 220px; }
   .lotcode { font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 600; color: var(--ink); }
@@ -477,7 +478,7 @@ function renderForm() {
     const tgl0 = o ? o.tglKirim : new Date(new Date(today + 'T12:00:00+08:00').getTime() + 864e5).toISOString().slice(0, 10);
     body = `<p class="label-sec">${o ? 'Isi pesanan' : '2. Isi pesanan'}</p>${rows}
       <label for="ftk">Tanggal kirim</label><input type="date" id="ftk" min="${o && o.tglKirim < tglMin ? o.tglKirim : tglMin}" value="${esc(form.tgl || tgl0)}">
-      <label for="fct">Catatan</label><textarea id="fct" rows="2" maxlength="300" placeholder="Mis. order via WA dari Pak Made">${esc(form.cat !== undefined ? form.cat : (o ? o.catatan : ''))}</textarea>
+      <label for="fct">Catatan</label><textarea id="fct" rows="2" maxlength="300" placeholder="Mis. Retail Bean 3 = Bali Kintamani Natural · order via WA Pak Made">${esc(form.cat !== undefined ? form.cat : (o ? o.catatan : ''))}</textarea>
       ${o ? (o.status === 'DIVALIDASI' ? '<p class="sub" style="margin-top:10px">Pesanan ini sudah divalidasi. Customer melihat perubahan di halamannya; kabari customer bila jumlah berubah.</p>' : '')
           : `<label class="check"><input type="checkbox" id="fval" ${form.val === false ? '' : 'checked'}><span>Langsung validasi<br><span class="sub">Centang bila jumlah & tanggal sudah dikonfirmasi dengan customer.</span></span></label>`}`;
   }
@@ -620,7 +621,7 @@ function renderProduksi() {
     const telat = h.tanggal < today;
     const prods = h.produk.filter(p => !L || p.lokasi === L);
     if (!prods.length) return '';
-    const rows = prods.map(p => `<tr><td><b>${esc(p.nama)}</b><div class="who-list">${p.rincian.map(r => `${esc(r.customer)} ${r.qty}`).join(' · ')}</div>${multi && !L ? ` <span class="loktag">${esc(p.lokasi)}</span>` : ''}${(d.stokKode[p.productId] || []).length ? `<div class="who-list">Stok berkode: ${d.stokKode[p.productId].map(k => `<span class="lotcode">${esc(k.lot)}</span> ${k.sisa}`).join(' · ')}</div>` : ''}</td><td class="num">${p.qty}</td><td class="num" style="color:${(p.stok || 0) >= p.qty ? 'var(--ok)' : 'var(--warn)'}">${p.stok || 0}</td></tr>`).join('');
+    const rows = prods.map(p => `<tr><td><b>${esc(p.nama)}</b><div class="who-list">${p.rincian.map(r => `${esc(r.customer)} ${r.qty}${(ordersById[r.orderId] || {}).catatan ? ' 📝' : ''}`).join(' · ')}</div>${multi && !L ? ` <span class="loktag">${esc(p.lokasi)}</span>` : ''}${(d.stokKode[p.productId] || []).length ? `<div class="who-list">Stok berkode: ${d.stokKode[p.productId].map(k => `<span class="lotcode">${esc(k.lot)}</span> ${k.sisa}`).join(' · ')}</div>` : ''}</td><td class="num">${p.qty}</td><td class="num" style="color:${(p.stok || 0) >= p.qty ? 'var(--ok)' : 'var(--warn)'}">${p.stok || 0}</td></tr>`).join('');
     const oids = [...new Set(prods.flatMap(p => p.rincian.map(r => r.orderId)))];
     const list = oids.map(id => ordersById[id]).filter(Boolean).sort((a, b) => a.ruteUrutan - b.ruteUrutan || a.customer.localeCompare(b.customer));
     let lastR = null;
@@ -636,12 +637,13 @@ function renderProduksi() {
         : lokOrder.filter(x => x !== L).map(x => lokTag(o, x, false)).join(' ');
       if (sudah) return head + `<div class="row done"><div style="padding-left:36px"><div class="name">${esc(o.customer)}</div>
         <div class="sub">${esc(o.id)} · ${mine(o).map(i => i.sisa + '× ' + esc(i.nama)).join(', ')}</div>
+        ${o.catatan ? `<div class="catatan">📝 ${esc(o.catatan)}</div>` : ''}
         <div class="sub"><span class="loktag ok">✓ Sudah siap di ${esc(L)}</span> ${L !== d.lokasiUtama && d.alurPindah ? ((o.siapLokasi || []).includes(L + '>' + d.lokasiUtama) ? `<span class="loktag ok">✓ sudah diambil ke ${esc(d.lokasiUtama)}</span>` : `<span class="loktag">menunggu diambil</span>`) : ''} ${lokInfo}</div></div></div>`;
       return head + `<div class="row${on ? ' picked' : ''}"><label class="ckrow"><input type="checkbox" class="ck" data-po="${esc(o.id)}" ${on ? 'checked' : ''}>
         <div><div class="name">${esc(o.customer)}</div>
         <div class="sub">${esc(o.id)} · ${mine(o).map(i => i.sisa + '× ' + esc(i.nama)).join(', ')}</div>
         ${lain.length ? `<div class="sub">+ ${o.items.filter(i => i.sisa > 0 && i.lokasi !== L).map(i => i.sisa + '× ' + esc(i.nama) + ' (' + esc(i.lokasi) + ')').join(', ')}</div>` : ''}
-        ${lokInfo ? `<div class="sub">${lokInfo}</div>` : ''}${saranHTML(o)}</div></label>
+        ${lokInfo ? `<div class="sub">${lokInfo}</div>` : ''}${o.catatan ? `<div class="catatan">📝 ${esc(o.catatan)}</div>` : ''}${saranHTML(o)}</div></label>
         <button class="btn sec" data-ship="${esc(o.id)}" title="Kirim sebagian / atur detail">Sebagian…</button></div>`;
     }).join('');
     return `<div class="day card">
@@ -773,6 +775,7 @@ function shipCard(x) {
     <div class="head"><label class="ckrow">${x.status === 'DIRENCANAKAN' ? `<input type="checkbox" class="ck" data-sp="${esc(x.id)}" ${on ? 'checked' : ''}>` : ''}<span class="name">${esc(x.customer)}</span></label><span class="status st-${esc(x.status)}">${esc(x.statusLabel)}</span></div>
     <div class="sub">${esc(x.id)} · ${esc(x.orderId)} · ${esc(tgl(x.tglRencana))}</div>
     <div style="margin:2px 0">${ruteTag(x)}${shipGroup === 'rute' && x.kurir ? ` <span class="sub">${esc(x.kurir)}</span>` : ''}</div>
+    ${x.orderCatatan ? `<div class="catatan">📝 ${esc(x.orderCatatan)}</div>` : ''}
     <div class="items">${x.items.map(i => `<div><span>${i.qty} × ${esc(i.nama)}${i.lokasi && i.lokasi !== lokUtama ? ` <span class="loktag">${alurPindah ? 'dari' : 'ambil di'} ${esc(i.lokasi)}</span>` : ''}</span></div>${lotLine(x, i)}`).join('')}</div>
     <div class="total"><span>Total</span><span>${rp(x.total)}</span></div>
     ${x.status === 'TERKIRIM' ? `<div class="sub" style="margin-top:6px">Terkirim ${esc(x.waktuTerkirim)}${x.penerima ? ' · diterima ' + esc(x.penerima) : ''}<br>${esc(x.sumber)}</div>` : ''}
