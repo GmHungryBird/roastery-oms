@@ -265,7 +265,7 @@ function renderCheckout() {
       <div class="lines">${lines.map(l => `<div class="row"><div>${l.qty} × ${esc(l.p.nama)}</div><div>${rp(l.sub)}</div></div>`).join('')}</div>
       <div class="total"><span>Total</span><span>${rp(lines.reduce((s, l) => s + l.sub, 0))}</span></div>
       <label for="tk">Tanggal kirim yang diminta</label><input type="date" id="tk" min="${min}" value="${besok}">
-      <label for="ct">Catatan (opsional)</label><textarea id="ct" maxlength="300" placeholder="Mis. kirim sebelum jam 10, titip ke bar"></textarea>
+      <label for="ct">Catatan (opsional)</label><textarea id="ct" maxlength="300" placeholder="Mis. Retail Bean 3: Bali Kintamani Natural · kirim sebelum jam 10"></textarea>
       <p class="sub" style="margin:12px 0 0">Jumlah yang dikirim bisa menyesuaikan stok. Admin akan mengonfirmasi sebelum pengiriman.</p>
     </section>
     <button class="btn ghost" id="back" style="color:var(--ink)">← Ubah pesanan</button>`;
