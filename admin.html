@@ -238,6 +238,14 @@ const FILTERS = [['MASUK', 'Pesanan masuk'], ['DIVALIDASI', 'Divalidasi'], ['BER
 const BERJALAN = ['DIPROSES', 'DIKIRIM', 'SEBAGIAN'];
 const SHIP_FILTERS = [['AKTIF', 'Belum terkirim'], ['DIRENCANAKAN', 'Masih produksi'], ['SIAP_KIRIM', 'Siap dikirim'], ['DIKIRIM', 'Dalam perjalanan'], ['TERKIRIM', 'Terkirim'], ['BATAL', 'Dibatalkan']];
 const NEXT = { DIRENCANAKAN: ['SIAP_KIRIM', 'Siap dikirim'], SIAP_KIRIM: ['DIKIRIM', 'Dibawa kurir (manual)'], DIKIRIM: ['TERKIRIM', 'Tandai terkirim (manual)'] };
+// Rute tanpa kurir HB (kolom "Diantar oleh" tab Rute): dari Siap dikirim langsung ke Terkirim
+const ANTAR = {
+  AMBIL: { ikon: '🏪', label: 'Ambil sendiri', tombol: 'Sudah diambil customer', nama: 'Nama yang mengambil' },
+  EKSPEDISI: { ikon: '📦', label: 'Ekspedisi', tombol: 'Sudah diserahkan ke ekspedisi', nama: 'Nama petugas ekspedisi' },
+  OJEK: { ikon: '🛵', label: 'Ojek online', tombol: 'Sudah diambil driver', nama: 'Nama driver' }
+};
+const antarOf = x => ANTAR[x && x.antar] || null;
+const nextOf = x => { const a = antarOf(x); return a && x.status === 'SIAP_KIRIM' ? ['TERKIRIM', a.tombol] : NEXT[x.status]; };
 const store = { get(k) { try { return sessionStorage.getItem(k); } catch (e) { return null; } }, set(k, v) { try { sessionStorage.setItem(k, v); } catch (e) {} }, del(k) { try { sessionStorage.removeItem(k); } catch (e) {} } };
 
 let auth = null, all = [], filter = 'MASUK', q = '', flash = null, today = '', view = 'pesanan';
@@ -767,20 +775,20 @@ async function saveShip() {
 
 /* ---------- Pengiriman ---------- */
 function shipCard(x) {
-  const next = NEXT[x.status];
+  const next = nextOf(x), ant = antarOf(x);
   const final = x.status === 'TERKIRIM' || x.status === 'BATAL';
   const kurirSel = `<select data-kurir="${esc(x.id)}"><option value="">Pilih kurir…</option>${couriers.map(k => `<option value="${esc(k.id)}"${k.id === x.kurirId ? ' selected' : ''}>${esc(k.nama)}</option>`).join('')}</select>`;
   const on = shipPick.has(x.id);
   return `<div class="card order bd-${esc(x.status)}${on ? ' picked' : ''}${x._pending ? ' pending' : ''}">
     <div class="head"><label class="ckrow">${x.status === 'DIRENCANAKAN' ? `<input type="checkbox" class="ck" data-sp="${esc(x.id)}" ${on ? 'checked' : ''}>` : ''}<span class="name">${esc(x.customer)}</span></label><span class="status st-${esc(x.status)}">${esc(x.statusLabel)}</span></div>
     <div class="sub">${esc(x.id)} · ${esc(x.orderId)} · ${esc(tgl(x.tglRencana))}</div>
-    <div style="margin:2px 0">${ruteTag(x)}${shipGroup === 'rute' && x.kurir ? ` <span class="sub">${esc(x.kurir)}</span>` : ''}</div>
+    <div style="margin:2px 0">${ruteTag(x)}${ant ? ` <span class="loktag">${ant.ikon} ${esc(ant.label)}</span>` : shipGroup === 'rute' && x.kurir ? ` <span class="sub">${esc(x.kurir)}</span>` : ''}</div>
     ${x.orderCatatan ? `<div class="catatan">📝 ${esc(x.orderCatatan)}</div>` : ''}
     <div class="items">${x.items.map(i => `<div><span>${i.qty} × ${esc(i.nama)}${i.lokasi && i.lokasi !== lokUtama ? ` <span class="loktag">${alurPindah ? 'dari' : 'ambil di'} ${esc(i.lokasi)}</span>` : ''}</span></div>${lotLine(x, i)}`).join('')}</div>
     <div class="total"><span>Total</span><span>${rp(x.total)}</span></div>
-    ${x.status === 'TERKIRIM' ? `<div class="sub" style="margin-top:6px">Terkirim ${esc(x.waktuTerkirim)}${x.penerima ? ' · diterima ' + esc(x.penerima) : ''}<br>${esc(x.sumber)}</div>` : ''}
+    ${x.status === 'TERKIRIM' ? `<div class="sub" style="margin-top:6px">Terkirim ${esc(x.waktuTerkirim)}${x.penerima ? (ant ? ' · ' : ' · diterima ') + esc(x.penerima) : ''}<br>${esc(x.sumber)}</div>` : ''}
     ${x.catatan ? `<div class="sub">Catatan: ${esc(x.catatan)}</div>` : ''}
-    ${!final ? `<div class="inline">${kurirSel}</div>` : `<div class="sub">Kurir: ${esc(x.kurir || '—')}</div>`}
+    ${ant ? (x.status === 'SIAP_KIRIM' ? `<div class="sub">Tidak lewat kurir HB. Tekan tombol di bawah saat barang ${x.antar === 'EKSPEDISI' ? 'diserahkan ke ekspedisi' : 'diambil'}.</div>` : '') : !final ? `<div class="inline">${kurirSel}</div>` : `<div class="sub">Kurir: ${esc(x.kurir || '—')}</div>`}
     ${x.status !== 'BATAL' ? `<div class="inline"><input data-inv="${esc(x.id)}" value="${esc(x.invoiceNo)}" placeholder="No. invoice"><button class="btn sec" data-saveinv="${esc(x.id)}">Simpan</button></div>` : ''}
     ${x.riwayat ? `<div class="hist">${esc(x.riwayat)}</div>` : ''}
     <div class="actions" data-sbox="${esc(x.id)}">
@@ -1139,7 +1147,7 @@ function renderPengiriman() {
       order[k] = shipGroup === 'rute' ? x.ruteUrutan : (x.kurir ? 1 : 0);
     });
     return Object.keys(groups).sort((a, b) => order[a] - order[b] || a.localeCompare(b))
-      .map(k => `<p class="group-h">${esc(k)} · ${groups[k].length} pengiriman${shipGroup === 'rute' && isToday ? ruteWho(k) : ''}</p><div class="grid">${groups[k].map(shipCard).join('')}</div>`).join('');
+      .map(k => { const an = shipGroup === 'rute' && antarOf(groups[k][0]); return `<p class="group-h">${esc(k)} · ${groups[k].length} pengiriman${an ? ` <span class="rwho">· ${an.ikon} ${esc(an.label)}, tanpa kurir HB</span>` : shipGroup === 'rute' && isToday ? ruteWho(k) : ''}</p><div class="grid">${groups[k].map(shipCard).join('')}</div>`; }).join('');
   };
   const dates = Object.keys(byDate).sort();
   $('#main').innerHTML = `${flash ? `<div class="alert ${flash.ok ? 'ok' : 'bad'}">${esc(flash.text)}</div>` : ''}
@@ -1264,16 +1272,20 @@ document.addEventListener('click', e => {
     });
   }
   if (t.dataset.sg) { shipGroup = t.dataset.sg; render(); }
+  if (t.dataset.sback) { keepScroll(renderPengiriman); }
   if (t.dataset.sday !== undefined) { shipDate = t.dataset.sday; load(); }
   if (t.dataset.next) {
     const to = t.dataset.to;
+    const sx = shipData && shipData.find(y => y.id === t.dataset.next), sa = antarOf(sx);
     if (to === 'TERKIRIM' && t.dataset.confirm !== '1') {
       const box = document.querySelector(`[data-sbox="${t.dataset.next}"]`);
-      box.innerHTML = `<input placeholder="Nama penerima (opsional)" id="pn-${esc(t.dataset.next)}"><button class="btn ok" data-next="${esc(t.dataset.next)}" data-to="TERKIRIM" data-confirm="1">Simpan terkirim</button>`;
+      box.innerHTML = `<input placeholder="${sa ? esc(sa.nama) + ' (wajib)' : 'Nama penerima (opsional)'}" id="pn-${esc(t.dataset.next)}"><button class="btn ok" data-next="${esc(t.dataset.next)}" data-to="TERKIRIM" data-confirm="1">${sa ? 'Simpan' : 'Simpan terkirim'}</button><button class="btn ghost" data-sback="1">Batal</button>`;
+      document.getElementById('pn-' + t.dataset.next).focus();
       return;
     }
-    t.disabled = true; t.textContent = 'Memproses…';
     const pn = document.getElementById('pn-' + t.dataset.next);
+    if (to === 'TERKIRIM' && sa && !(pn && pn.value.trim())) { if (pn) { pn.style.borderColor = 'var(--bad, #c0392b)'; pn.placeholder = 'Isi ' + sa.nama.toLowerCase() + ' dulu'; pn.focus(); } return; }
+    t.disabled = true; t.textContent = 'Memproses…';
     shipUpdate(t.dataset.next, { status: to, penerima: pn ? pn.value.trim() : '' }, '{id}: status diperbarui.');
   }
   if (t.dataset.kirimhariini) { t.disabled = true; shipUpdate(t.dataset.kirimhariini, { tglRencana: today }, '{id}: dipindah ke hari ini, langsung muncul di daftar muat kurir.'); }
