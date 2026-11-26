@@ -119,6 +119,19 @@
   .invrow { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 14px; }
   .invrow .r { text-align: right; font-variant-numeric: tabular-nums; }
   .late { color: var(--err); font-weight: 600; }
+  .ditagih { display: inline-block; font-size: 12px; font-weight: 600; color: var(--navy, #13294b); background: #e6ecf6; border-radius: 999px; padding: 1px 8px; margin-left: 4px; }
+  .wapanel textarea { width: 100%; min-height: 220px; font: 14px/1.45 inherit; padding: 10px; border: 1px solid var(--line); border-radius: 10px; resize: vertical; }
+  .wapanel .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+  .btn.wa { background: #1f8f4e; color: #fff; }
+  .annrow { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px dashed var(--line); }
+  .annrow .grow { flex: 1; min-width: 0; }
+  label.annrow { display: flex; margin: 0; font-weight: 400; cursor: pointer; }
+  .annrow input[type=checkbox] { width: 20px; height: 20px; flex: 0 0 auto; margin: 0; }
+  .annrow > .sub:last-child { flex: 0 0 auto; text-align: right; }
+  .annrow.done { opacity: .62; }
+  .annprev { white-space: pre-wrap; background: #eef6f0; border: 1px solid #cfe5d6; border-radius: 12px; padding: 12px; font-size: 14px; line-height: 1.45; }
+  .bar { height: 8px; background: var(--line); border-radius: 99px; overflow: hidden; margin: 6px 0; }
+  .bar > i { display: block; height: 100%; background: #1f8f4e; }
   .payrow { display: flex; gap: 10px; align-items: center; padding: 6px 0; border-top: 1px dashed var(--line); font-size: 14px; }
   .payrow input[type=checkbox] { width: 20px; height: 20px; flex: none; margin: 0; }
   .payrow input[inputmode] { width: 130px; flex: none; text-align: right; }
@@ -252,7 +265,8 @@ let auth = null, all = [], filter = 'MASUK', q = '', flash = null, today = '', v
 let prodData = null, shipData = null, couriers = [], shipFilter = 'AKTIF', shipDate = '', shipForm = null, shipGroup = 'rute';
 let prodPick = new Set(), shipPick = new Set(), busy = false;
 let ruteKurir = {}, prodLok = null, lokUtama = 'Anggrek', alurPindah = true, terimaPick = new Set(), terimaOleh = '';
-let tgView = 'belum', tgInv = null, tgPay = null, tgBadge = 0, tgOpen = null, tgForm = null;
+let annData = null, annEdit = null, annSend = null;
+let tgView = 'belum', tgInv = null, tgPay = null, tgBadge = 0, tgOpen = null, tgForm = null, tgWa = null;
 let lotData = null, batchForm = null, packForm = null, lotDone = null, labelFor = null, repJenis = 'form17', repBulan = '', repData = null;
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
 const ruteLabel = r => r || 'Belum ada rute';
@@ -330,6 +344,10 @@ async function load(fresh) {
     loading('Memuat stok kode produksi…');
     r = await api({ action: 'adminLots', staffId: auth.staffId, pin: auth.pin });
     if (r.ok) { lotData = r; today = r.hariIni; }
+  } else if (view === 'pengumuman') {
+    loading('Memuat daftar customer…');
+    r = await api({ action: 'adminAnnList', staffId: auth.staffId, pin: auth.pin });
+    if (r.ok) { annData = r; today = r.hariIni || today; }
   } else if (view === 'tagihan') {
     loading('Memuat tagihan…');
     const [a, p] = await Promise.all([api({ action: 'adminInvoices', staffId: auth.staffId, pin: auth.pin, fresh }), api({ action: 'adminPayments', staffId: auth.staffId, pin: auth.pin })]);
@@ -352,7 +370,7 @@ async function load(fresh) {
 
 function renderTabs() {
   const tabs = [['pesanan', 'Pesanan']].concat(canShip() ? [['produksi', 'Produksi'], ['kode', 'Kode'], ['pengiriman', 'Pengiriman'], ['laporan', 'Laporan']] : [])
-    .concat(isAdmin() ? [['tagihan', 'Tagihan' + (tgBadge ? ' (' + tgBadge + ')' : '')]] : []);
+    .concat(isAdmin() ? [['tagihan', 'Tagihan' + (tgBadge ? ' (' + tgBadge + ')' : '')], ['pengumuman', 'Pengumuman']] : []);
   $('#tabs').innerHTML = tabs.map(([v, l]) => `<button class="tab${view === v ? ' on' : ''}" data-view="${v}">${l}</button>`).join('');
 }
 
@@ -406,6 +424,7 @@ function render() {
   if (view === 'kode') return renderKode();
   if (view === 'laporan') return renderLaporan();
   if (view === 'tagihan') return renderTagihan();
+  if (view === 'pengumuman') return renderPengumuman();
   const match = (o, s) => !s || (s === 'BERJALAN' ? BERJALAN.includes(o.status) : o.status === s);
   const count = s => all.filter(o => match(o, s)).length;
   const ql = q.toLowerCase();
@@ -1021,10 +1040,11 @@ function renderTagihan() {
         const open = tgOpen === g.customerId, f = tgForm && tgForm.cid === g.customerId ? tgForm : null;
         return `<div class="card order" style="margin-bottom:10px">
         <div class="head"><button class="linkish" data-tgopen="${esc(g.customerId)}"><b>${open ? '▾' : '▸'} ${esc(g.customer)}</b></button><b>${rp(g.total)}</b></div>
-        <div class="sub">${g.invoices.length} tagihan${g.telatMaks ? ` · <span class="late">telat ${g.telatMaks} hari</span>` : ''}${g.plafon ? ' · plafon ' + rp(g.plafon) : ''}${g.lewat ? ` · <span class="late">⚠ ${esc(g.alasan)}</span>` : ''}</div>
-        ${open ? g.invoices.map(v => `<div class="invrow"><div><b>${esc(v.invoiceNo || '(belum ada no.)')}</b> · ${esc(v.id)}<div class="sub">Kirim ${esc(tglPendek(v.tglKirim))} · jatuh tempo ${esc(tglPendek(v.jatuhTempo))}${v.telatHari ? ` · <span class="late">telat ${v.telatHari} hari</span>` : ''}${v.menunggu ? ` · menunggu verifikasi ${rp(v.menunggu)}` : ''}</div></div>
+        <div class="sub">${g.invoices.length} tagihan${g.telatMaks ? ` · <span class="late">telat ${g.telatMaks} hari</span>` : ''}${tagihTerakhir(g) ? ` · <span class="ditagih">📨 ditagih ${esc(tglJam(tagihTerakhir(g)))}</span>` : ''}${g.plafon ? ' · plafon ' + rp(g.plafon) : ''}${g.lewat ? ` · <span class="late">⚠ ${esc(g.alasan)}</span>` : ''}</div>
+        ${open ? g.invoices.map(v => `<div class="invrow"><div><b>${esc(v.invoiceNo || '(belum ada no.)')}</b> · ${esc(v.id)}<div class="sub">Kirim ${esc(tglPendek(v.tglKirim))} · jatuh tempo ${esc(tglPendek(v.jatuhTempo))}${v.telatHari ? ` · <span class="late">telat ${v.telatHari} hari</span>` : ''}${v.menunggu ? ` · menunggu verifikasi ${rp(v.menunggu)}` : ''}${v.ditagih ? ` <span class="ditagih">📨 Ditagihkan ${esc(tglJam(v.ditagih.waktu))}${v.ditagih.kali > 1 ? ' · ' + v.ditagih.kali + '×' : ''}</span>` : ''}</div></div>
           <div class="r"><b>${rp(v.sisa)}</b>${v.terbayar ? `<div class="sub">dari ${rp(v.total)}</div>` : ''}</div></div>`).join('') : ''}
-        ${open && !f ? `<div class="actions"><button class="btn sec" data-tgrecord="${esc(g.customerId)}">Catat pembayaran</button></div>` : ''}
+        ${open && !f && !(tgWa && tgWa.cid === g.customerId) ? `<div class="actions"><button class="btn wa" data-tgwa="${esc(g.customerId)}">Kirim tagihan WA</button><button class="btn sec" data-tgrecord="${esc(g.customerId)}">Catat pembayaran</button></div>` : ''}
+        ${tgWa && tgWa.cid === g.customerId ? waPanelHTML(g) : ''}
         ${f ? `<div style="margin-top:10px"><p class="label-sec">Catat pembayaran ${esc(g.customer)}</p>
           ${g.invoices.map(v => `<div class="payrow"><input type="checkbox" data-pfck="${esc(v.id)}" ${f.pick[v.id] !== undefined ? 'checked' : ''}><span class="grow">${esc(v.invoiceNo || v.id)} <span class="sub">sisa ${rp(v.sisa)}</span></span>
             <input inputmode="numeric" data-pfamt="${esc(v.id)}" value="${f.pick[v.id] !== undefined ? f.pick[v.id] : ''}" placeholder="${v.sisa}"></div>`).join('')}
@@ -1070,6 +1090,215 @@ function renderTagihan() {
     $('#pfCat').oninput = e => { f.catatan = e.target.value; };
     $('#pfSave').onclick = simpanBayar;
   }
+}
+// ===== Pengingat tagihan via WhatsApp =====
+const tglJam = w => { const [d, j] = String(w || '').split(' '); return tglPendek(d) + (j ? ' ' + j : ''); };
+const tagihTerakhir = g => g.invoices.map(v => v.ditagih && v.ditagih.waktu).filter(Boolean).sort().pop() || '';
+const jatuhTempo = v => v.jatuhTempo && v.jatuhTempo <= today;
+const waNomor = v => String(v || '').replace(/\D/g, '').replace(/^0/, '62').replace(/^8/, '628');
+function waPilihAwal(g, mode) {
+  const p = {};
+  const ini = mode === 'semua' ? g.invoices : g.invoices.filter(jatuhTempo);
+  (ini.length || mode ? ini : g.invoices).forEach(v => { p[v.id] = true; });
+  return p;
+}
+function waPesan(g, w) {
+  const C = tgInv.wa || {}, pilih = g.invoices.filter(v => w.pick[v.id]);
+  const total = pilih.reduce((a, v) => a + v.sisa, 0);
+  const semuaTelat = pilih.length && pilih.every(jatuhTempo);
+  const daftar = pilih.map((v, i) => `${i + 1}. ${v.invoiceNo ? 'Invoice ' + v.invoiceNo : 'Pengiriman ' + v.id} · kirim ${tglPendek(v.tglKirim)} · jatuh tempo ${tglPendek(v.jatuhTempo)}${v.telatHari > 0 ? ' (lewat ' + v.telatHari + ' hari)' : ''}\n   ${rp(v.sisa)}${v.terbayar ? ' (sisa dari ' + rp(v.total) + ')' : ''}`).join('\n');
+  const link = g.token ? location.href.replace(/admin\.html.*$/, '').replace(/[?#].*$/, '') + '?t=' + g.token : '';
+  const isi = {
+    pic: g.pic || 'Bapak/Ibu', customer: g.customer, daftar, total: rp(total), rekening: C.rekening || '-', link: link || '-', usaha: C.usaha || 'Hungry Bird Coffee Roaster'
+  };
+  const tpl = (C.template || '').replace(/\\n/g, '\n') ||
+`Halo {pic},
+
+Kami dari {usaha} ingin mengingatkan tagihan {customer} yang ${semuaTelat ? 'sudah jatuh tempo' : 'belum terbayar'}:
+
+{daftar}
+
+*Total: {total}*
+
+${C.rekening ? 'Pembayaran dapat ditransfer ke:\n{rekening}\n' : ''}${link ? '\nRincian tagihan & konfirmasi pembayaran:\n{link}\n' : ''}
+Bila sudah melakukan pembayaran, mohon abaikan pesan ini. Terima kasih 🙏`;
+  return tpl.replace(/\{(\w+)\}/g, (m, k) => isi[k] !== undefined ? isi[k] : m).replace(/\n{3,}/g, '\n\n');
+}
+function waPanelHTML(g) {
+  const w = tgWa, nTelat = g.invoices.filter(jatuhTempo).length;
+  if (!w.edited) w.text = waPesan(g, w);
+  const nPilih = g.invoices.filter(v => w.pick[v.id]).length, total = g.invoices.filter(v => w.pick[v.id]).reduce((a, v) => a + v.sisa, 0);
+  return `<div class="wapanel" style="margin-top:10px"><p class="label-sec">Kirim tagihan WA · ${esc(g.customer)}</p>
+    <div class="chips"><button class="chip${w.mode === 'telat' ? ' on' : ''}" data-wamode="telat">Yang sudah jatuh tempo (${nTelat})</button><button class="chip${w.mode === 'semua' ? ' on' : ''}" data-wamode="semua">Semua (${g.invoices.length})</button></div>
+    ${g.invoices.map(v => `<label class="payrow"><input type="checkbox" data-wack="${esc(v.id)}" ${w.pick[v.id] ? 'checked' : ''}><span class="grow">${esc(v.invoiceNo || v.id)} <span class="sub">jatuh tempo ${esc(tglPendek(v.jatuhTempo))}${v.telatHari > 0 ? ` · <span class="late">telat ${v.telatHari} hari</span>` : ''}${v.ditagih ? ' · 📨 ' + esc(tglJam(v.ditagih.waktu)) : ''}${!v.invoiceNo ? ' · <span class="late">belum ada no. invoice</span>' : ''}</span></span><b>${rp(v.sisa)}</b></label>`).join('')}
+    <div class="inline" style="margin-top:8px"><input id="waNo" inputmode="tel" placeholder="Nomor WA customer (mis. 08123…)" value="${esc(w.no)}"><span class="sub">${g.pic ? 'PIC: ' + esc(g.pic) : 'PIC belum diisi di tab Customers'}</span></div>
+    <textarea id="waText">${esc(w.text)}</textarea>
+    ${w.edited ? '<div class="sub">Pesan sudah diubah manual. <button class="linkish" data-wareset="1">Susun ulang dari pilihan</button></div>' : ''}
+    <div class="actions"><b style="margin-right:auto">${nPilih} tagihan · ${rp(total)}</b><button class="chip" data-wacancel="1">Batal</button><button class="chip" data-wacopy="1" ${nPilih ? '' : 'disabled'}>Salin pesan</button><button class="btn wa" data-wasend="1" ${nPilih && !busy ? '' : 'disabled'}>Buka WhatsApp</button></div>
+    <p class="sub">Tagihan yang dipilih otomatis ditandai <b>Ditagihkan</b> saat WhatsApp dibuka atau pesan disalin.</p></div>`;
+}
+async function waCatat(via) {
+  const g = tgInv.piutang.find(x => x.customerId === tgWa.cid);
+  const ids = g.invoices.filter(v => tgWa.pick[v.id]).map(v => v.id);
+  let r;
+  try { r = await api({ action: 'adminTagihCatat', staffId: auth.staffId, pin: auth.pin, ref: tgWa.ref, shipmentIds: ids, via }); }
+  catch (e) { r = { ok: false, error: 'Koneksi terputus, status Ditagihkan belum tersimpan. Coba lagi.' }; }
+  if (!r.ok) { flash = { ok: false, text: r.error }; return keepScroll(renderTagihan); }
+  flash = { ok: true, text: ids.length + ' tagihan ' + g.customer + ' ditandai Ditagihkan' + (via === 'salin' ? ' (pesan disalin, tempel di WhatsApp).' : '.') };
+  tgWa = null; await load(true);
+}
+async function salinTeks(t) {
+  try { await navigator.clipboard.writeText(t); }
+  catch (e) { const x = document.createElement('textarea'); x.value = t; document.body.appendChild(x); x.select(); document.execCommand('copy'); x.remove(); }
+}
+function waKirim() {
+  const w = tgWa; if (!w) return;
+  const no = waNomor(w.no);
+  if (no.length < 9) { flash = { ok: false, text: 'Isi nomor WA customer dulu.' }; return keepScroll(renderTagihan); }
+  window.open('https://wa.me/' + no + '?text=' + encodeURIComponent(w.text), '_blank', 'noopener');
+  waCatat('wa');
+}
+async function waSalin() { const w = tgWa; if (!w) return; await salinTeks(w.text); waCatat('salin'); }
+// ===== Pengumuman WA ke customer =====
+const ANN_TPL = {
+  libur: ['Libur', `Halo {pic},
+
+Kami dari {usaha} ingin menginformasikan bahwa roastery kami *libur pada [tanggal]*.
+Pesanan yang masuk selama libur akan kami proses mulai [tanggal buka].
+
+Agar stok {customer} aman, mohon kirimkan pesanan paling lambat [tanggal].
+
+Terima kasih 🙏`],
+  harga: ['Kenaikan harga', `Halo {pic},
+
+Kami dari {usaha} ingin menginformasikan adanya *penyesuaian harga mulai [tanggal berlaku]*, karena [alasan singkat].
+
+Rincian harga baru untuk {customer}: [rincian, atau "akan kami kirimkan terpisah"].
+
+Pesanan sebelum [tanggal] masih memakai harga lama. Terima kasih atas pengertian dan kerja samanya 🙏`],
+  raya: ['Tutup hari raya', `Halo {pic},
+
+Sehubungan dengan Hari Raya [nama hari raya], {usaha} *tutup pada [tanggal] s/d [tanggal]* dan buka kembali [tanggal].
+
+Agar stok {customer} aman selama libur, mohon kirimkan pesanan paling lambat [tanggal].
+
+Selamat Hari Raya [nama hari raya] 🙏`]
+};
+const annCust = id => (annData.customers.find(c => c.id === id) || { id, nama: id, pic: '', wa: '', area: '' });
+const annPesanUntuk = (pesan, c) => String(pesan || '').replace(/\{(pic|customer|usaha)\}/g, (m, k) => k === 'pic' ? (c.pic || 'Bapak/Ibu') : k === 'customer' ? c.nama : (annData.usaha || 'Hungry Bird Coffee Roaster'));
+const annSisaIsian = p => (String(p || '').match(/\[[^\]\n]{2,40}\]/g) || []);
+function annBaru(tpl) {
+  const aktif = annData.customers.filter(c => c.aktif && c.wa).map(c => c.id);
+  annEdit = { id: '', ref: uid(), judul: tpl ? ANN_TPL[tpl][0] : '', pesan: tpl ? ANN_TPL[tpl][1] : '', pick: new Set(aktif), area: '', q: '' };
+  annSend = null;
+}
+function renderPengumuman() {
+  const D = annData;
+  if (!D) return;
+  const fl = flash ? `<div class="alert ${flash.ok ? 'ok' : 'bad'}">${esc(flash.text)}</div>` : '';
+  flash = null;
+  if (annEdit) return renderAnnEdit(fl);
+  if (annSend) return renderAnnKirim(fl);
+  $('#main').innerHTML = `${fl}
+    <div class="card"><p class="label-sec">Buat pengumuman ke customer</p>
+      <p class="sub">Tulis sekali, kirim ke banyak customer lewat WhatsApp. Pesan dibuka satu per satu di WhatsApp dengan nama tiap customer, lalu OMS mencatat siapa saja yang sudah dikirimi.</p>
+      <div class="chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px">
+        <button class="btn wa" data-annnew="">Pengumuman baru</button>
+        ${Object.keys(ANN_TPL).map(k => `<button class="chip" data-annnew="${k}">Template: ${esc(ANN_TPL[k][0])}</button>`).join('')}
+      </div></div>
+    <p class="label-sec" style="margin-top:18px">Riwayat pengumuman</p>
+    ${D.pengumuman.length ? D.pengumuman.map(a => {
+      const n = a.penerima.length, k = a.penerima.filter(id => a.terkirim[id]).length;
+      return `<div class="card"><div class="head"><button class="linkish" data-annopen="${esc(a.id)}"><b>${esc(a.judul || a.id)}</b></button><span class="sub">${esc(tglJam(a.dibuat))}</span></div>
+        <div class="bar"><i style="width:${n ? Math.round(k / n * 100) : 0}%"></i></div>
+        <div class="sub">${k} dari ${n} customer sudah dikirimi · dibuat ${esc(a.oleh)}</div>
+        <div class="actions"><button class="btn ${k < n ? 'wa' : 'sec'}" data-annopen="${esc(a.id)}">${k < n ? 'Lanjut kirim' : 'Lihat'}</button><button class="chip" data-anncopy="${esc(a.id)}">Pakai lagi</button></div></div>`;
+    }).join('') : '<div class="msg">Belum ada pengumuman.</div>'}`;
+}
+function renderAnnEdit(fl) {
+  const E = annEdit, D = annData, ql = E.q.toLowerCase();
+  const areas = [...new Set(D.customers.filter(c => c.aktif).map(c => c.area || 'Tanpa area'))].sort();
+  const tampil = D.customers.filter(c => (c.aktif || E.pick.has(c.id)) && (!E.area || (c.area || 'Tanpa area') === E.area) && (!ql || (c.nama + ' ' + c.id + ' ' + c.pic).toLowerCase().includes(ql)));
+  const dipilih = D.customers.filter(c => E.pick.has(c.id)), tanpaWa = dipilih.filter(c => !c.wa).length;
+  const contoh = dipilih[0] || D.customers[0], isian = annSisaIsian(E.pesan);
+  $('#main').innerHTML = `${fl}
+    <div class="card"><div class="head"><b>${E.id ? 'Ubah pengumuman ' + esc(E.id) : 'Pengumuman baru'}</b><button class="chip" data-annback="1">Kembali</button></div>
+      <label class="sub">Judul (untuk catatan admin, tidak ikut terkirim)</label>
+      <input id="annJudul" value="${esc(E.judul)}" placeholder="Mis. Libur Galungan" style="width:100%">
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 6px">${Object.keys(ANN_TPL).map(k => `<button class="chip" data-anntpl="${k}">${esc(ANN_TPL[k][0])}</button>`).join('')}</div>
+      <textarea id="annPesan" style="width:100%;min-height:230px;font:14px/1.45 inherit;padding:10px;border:1px solid var(--line);border-radius:10px">${esc(E.pesan)}</textarea>
+      <div class="sub">Isian otomatis: <button class="chip" data-annins="{pic}">{pic}</button> <button class="chip" data-annins="{customer}">{customer}</button> <button class="chip" data-annins="{usaha}">{usaha}</button></div>
+      ${isian.length ? `<div class="alert bad" style="margin-top:8px">Masih ada isian yang belum diganti: ${esc([...new Set(isian)].join(', '))}</div>` : ''}
+      ${contoh ? `<p class="label-sec" style="margin-top:12px">Contoh untuk ${esc(contoh.nama)}</p><div class="annprev">${esc(annPesanUntuk(E.pesan, contoh))}</div>` : ''}
+    </div>
+    <div class="card"><div class="head"><b>Penerima · ${dipilih.length} customer</b>${tanpaWa ? `<span class="late">${tanpaWa} tanpa nomor WA</span>` : ''}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0">
+        <button class="chip" data-annall="1">Pilih semua yang punya WA</button><button class="chip" data-annnone="1">Kosongkan</button>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px"><button class="chip${!E.area ? ' on' : ''}" data-annarea="">Semua area</button>${areas.map(a => `<button class="chip${E.area === a ? ' on' : ''}" data-annarea="${esc(a)}">${esc(a)}</button>`).join('')}</div>
+      <div class="inline"><input id="annQ" placeholder="Cari customer…" value="${esc(E.q)}">${E.area ? `<button class="chip" data-annareaall="1">Centang semua di ${esc(E.area)}</button>` : ''}</div>
+      ${tampil.map(c => `<label class="annrow"><input type="checkbox" data-annck="${esc(c.id)}" ${E.pick.has(c.id) ? 'checked' : ''}><span class="grow"><b>${esc(c.nama)}</b> <span class="sub">${esc(c.area || 'Tanpa area')}${c.pic ? ' · ' + esc(c.pic) : ''}</span></span><span class="sub">${c.wa ? esc(c.wa) : '<span class="late">belum ada WA PIC</span>'}</span></label>`).join('') || '<div class="sub">Tidak ada customer.</div>'}
+      <div class="actions" style="margin-top:10px"><b style="margin-right:auto">${dipilih.length} penerima</b><button class="chip" data-annback="1">Batal</button><button class="btn wa" id="annSave" ${busy ? 'disabled' : ''}>Simpan & mulai kirim</button></div>
+    </div>`;
+  $('#annSave').onclick = annSimpan;
+}
+async function annSimpan() {
+  const E = annEdit;
+  if (!E.pesan.trim()) { flash = { ok: false, text: 'Tulis isi pengumuman dulu.' }; return keepScroll(renderPengumuman); }
+  if (!E.pick.size) { flash = { ok: false, text: 'Pilih minimal satu penerima.' }; return keepScroll(renderPengumuman); }
+  const isian = annSisaIsian(E.pesan);
+  if (isian.length && !confirm('Masih ada isian ' + [...new Set(isian)].join(', ') + ' yang belum diganti. Tetap simpan?')) return;
+  busy = true; $('#annSave').disabled = true; $('#annSave').textContent = 'Menyimpan…';
+  let r;
+  try { r = await api({ action: 'adminAnnSave', staffId: auth.staffId, pin: auth.pin, id: E.id, ref: E.ref, judul: E.judul, pesan: E.pesan, penerima: [...E.pick] }); }
+  catch (e) { r = { ok: false, error: 'Koneksi terputus. Coba simpan lagi; tidak akan tercatat dobel.' }; }
+  busy = false;
+  if (!r.ok) { flash = { ok: false, text: r.error }; return keepScroll(renderPengumuman); }
+  annEdit = null; annSend = r.id; flash = { ok: true, text: 'Pengumuman tersimpan. Kirim ke tiap customer dengan tombol hijau di bawah.' };
+  await load(true); window.scrollTo(0, 0);
+}
+function renderAnnKirim(fl) {
+  const a = annData.pengumuman.find(x => x.id === annSend);
+  if (!a) { annSend = null; return renderPengumuman(); }
+  const cs = a.penerima.map(annCust), belum = cs.filter(c => !a.terkirim[c.id]), next = belum.find(c => c.wa) || belum[0];
+  const k = cs.length - belum.length;
+  $('#main').innerHTML = `${fl}
+    <div class="card"><div class="head"><b>${esc(a.judul || a.id)}</b><button class="chip" data-annback="1">Kembali</button></div>
+      <div class="bar"><i style="width:${cs.length ? Math.round(k / cs.length * 100) : 0}%"></i></div>
+      <div class="sub">${k} dari ${cs.length} customer sudah dikirimi</div>
+      ${next ? `<p class="label-sec" style="margin-top:12px">Berikutnya: ${esc(next.nama)} ${next.wa ? '· ' + esc(next.wa) : '· <span class="late">belum ada nomor WA</span>'}</p>
+        <div class="annprev">${esc(annPesanUntuk(a.pesan, next))}</div>
+        <div class="actions">${next.wa ? `<button class="btn wa" data-annwa="${esc(next.id)}" style="flex:1">Kirim WA ke ${esc(next.nama)}</button>` : ''}<button class="chip" data-annsalin="${esc(next.id)}">Salin pesan</button><button class="chip" data-annskip="${esc(next.id)}">Lewati</button></div>
+        <p class="sub">Setelah menekan Kirim di WhatsApp, kembali ke halaman ini lalu tekan tombol hijau lagi untuk customer berikutnya.</p>`
+      : '<div class="alert ok" style="margin-top:10px">Semua penerima sudah dikirimi. 🎉</div>'}
+      <div class="actions"><button class="chip" data-annedit="${esc(a.id)}">Ubah pesan / penerima</button></div>
+    </div>
+    <div class="card"><p class="label-sec">Daftar penerima</p>
+      ${cs.map(c => { const t = a.terkirim[c.id]; return `<div class="annrow${t ? ' done' : ''}"><span class="grow"><b>${esc(c.nama)}</b> <span class="sub">${c.wa ? esc(c.wa) : '<span class="late">tanpa WA</span>'}</span>${t ? `<div class="sub">✓ ${t.cara === 'lewati' ? 'dilewati' : 'terkirim'} ${esc(tglJam(t.waktu))}${t.oleh ? ' · ' + esc(t.oleh) : ''}</div>` : ''}</span>
+        ${c.wa ? `<button class="chip" data-annwa="${esc(c.id)}">${t ? 'Kirim ulang' : 'WA'}</button>` : ''}<button class="chip" data-annsalin="${esc(c.id)}">Salin</button></div>`; }).join('')}
+    </div>`;
+}
+async function annTandai(cid, via) {
+  const a = annData.pengumuman.find(x => x.id === annSend); if (!a) return;
+  const c = annCust(cid);
+  a.terkirim[cid] = { waktu: new Date(Date.now() + 8 * 36e5).toISOString().slice(0, 16).replace('T', ' '), oleh: auth.nama, cara: via };
+  keepScroll(renderPengumuman);
+  let r;
+  try { r = await api({ action: 'adminAnnSent', staffId: auth.staffId, pin: auth.pin, id: a.id, customerId: cid, nomor: c.wa, via }); }
+  catch (e) { r = { ok: false, error: 'Koneksi terputus: tanda terkirim untuk ' + c.nama + ' belum tersimpan.' }; }
+  if (!r.ok) { delete a.terkirim[cid]; flash = { ok: false, text: r.error }; keepScroll(renderPengumuman); }
+}
+function annKirimWa(cid) {
+  const a = annData.pengumuman.find(x => x.id === annSend), c = annCust(cid);
+  if (!c.wa) return;
+  window.open('https://wa.me/' + waNomor(c.wa) + '?text=' + encodeURIComponent(annPesanUntuk(a.pesan, c)), '_blank', 'noopener');
+  annTandai(cid, 'wa');
+}
+async function annSalin(cid) {
+  const a = annData.pengumuman.find(x => x.id === annSend), c = annCust(cid);
+  await salinTeks(annPesanUntuk(a.pesan, c));
+  annTandai(cid, 'salin');
+  flash = { ok: true, text: 'Pesan untuk ' + c.nama + ' disalin. Tempel di WhatsApp.' }; keepScroll(renderPengumuman);
 }
 const tgUpdTotal = () => { if (tgForm && $('#pfTot')) $('#pfTot').textContent = rp(Object.values(tgForm.pick).reduce((a, x) => a + (Number(x) || 0), 0)); };
 async function simpanBayar() {
@@ -1231,9 +1460,29 @@ document.addEventListener('click', e => {
   if (t.dataset.rj) { repJenis = t.dataset.rj; load(); }
   if (t.dataset.plok !== undefined) { prodLok = t.dataset.plok; prodPick = new Set(); keepScroll(renderProduksi); }
   if (t.dataset.tgv) { tgView = t.dataset.tgv; tgForm = null; render(); }
-  if (t.dataset.tgopen) { tgOpen = tgOpen === t.dataset.tgopen ? null : t.dataset.tgopen; tgForm = null; keepScroll(renderTagihan); }
-  if (t.dataset.tgrecord) { tgForm = { cid: t.dataset.tgrecord, ref: uid(), pick: {}, tgl: today, metode: 'Transfer', catatan: '' }; keepScroll(renderTagihan); }
+  if (t.dataset.tgopen) { tgOpen = tgOpen === t.dataset.tgopen ? null : t.dataset.tgopen; tgForm = null; tgWa = null; keepScroll(renderTagihan); }
+  if (t.dataset.tgrecord) { tgWa = null; tgForm = { cid: t.dataset.tgrecord, ref: uid(), pick: {}, tgl: today, metode: 'Transfer', catatan: '' }; keepScroll(renderTagihan); }
   if (t.dataset.pfcancel) { tgForm = null; keepScroll(renderTagihan); }
+  if (t.dataset.annnew !== undefined) { annBaru(t.dataset.annnew); renderPengumuman(); window.scrollTo(0, 0); }
+  if (t.dataset.annopen) { annSend = t.dataset.annopen; annEdit = null; renderPengumuman(); window.scrollTo(0, 0); }
+  if (t.dataset.anncopy) { const a = annData.pengumuman.find(x => x.id === t.dataset.anncopy); annBaru(''); annEdit.judul = a.judul; annEdit.pesan = a.pesan; annEdit.pick = new Set(a.penerima); renderPengumuman(); window.scrollTo(0, 0); }
+  if (t.dataset.annedit) { const a = annData.pengumuman.find(x => x.id === t.dataset.annedit); annEdit = { id: a.id, ref: uid(), judul: a.judul, pesan: a.pesan, pick: new Set(a.penerima), area: '', q: '' }; renderPengumuman(); }
+  if (t.dataset.annback) { if (annEdit) { annSend = annEdit.id || null; annEdit = null; } else annSend = null; renderPengumuman(); window.scrollTo(0, 0); }
+  if (t.dataset.anntpl && annEdit) { if (!annEdit.pesan.trim() || confirm('Ganti isi pesan dengan template "' + ANN_TPL[t.dataset.anntpl][0] + '"?')) { annEdit.pesan = ANN_TPL[t.dataset.anntpl][1]; if (!annEdit.judul) annEdit.judul = ANN_TPL[t.dataset.anntpl][0]; keepScroll(renderPengumuman); } }
+  if (t.dataset.annins && annEdit) { const ta = $('#annPesan'); const i = ta.selectionStart || ta.value.length; annEdit.pesan = ta.value.slice(0, i) + t.dataset.annins + ta.value.slice(ta.selectionEnd || i); keepScroll(renderPengumuman); }
+  if (t.dataset.annall && annEdit) { annData.customers.filter(c => c.aktif && c.wa).forEach(c => annEdit.pick.add(c.id)); keepScroll(renderPengumuman); }
+  if (t.dataset.annnone && annEdit) { annEdit.pick.clear(); keepScroll(renderPengumuman); }
+  if (t.dataset.annarea !== undefined && annEdit) { annEdit.area = t.dataset.annarea; keepScroll(renderPengumuman); }
+  if (t.dataset.annareaall && annEdit) { annData.customers.filter(c => c.aktif && (c.area || 'Tanpa area') === annEdit.area).forEach(c => annEdit.pick.add(c.id)); keepScroll(renderPengumuman); }
+  if (t.dataset.annwa) annKirimWa(t.dataset.annwa);
+  if (t.dataset.annsalin) annSalin(t.dataset.annsalin);
+  if (t.dataset.annskip) annTandai(t.dataset.annskip, 'lewati');
+  if (t.dataset.tgwa) { const g = tgInv.piutang.find(x => x.customerId === t.dataset.tgwa); const ada = g.invoices.some(jatuhTempo); tgForm = null; tgWa = { cid: g.customerId, ref: uid(), mode: ada ? 'telat' : 'semua', pick: waPilihAwal(g, ada ? 'telat' : 'semua'), no: g.wa || '', edited: false, text: '' }; keepScroll(renderTagihan); }
+  if (t.dataset.wamode && tgWa) { const g = tgInv.piutang.find(x => x.customerId === tgWa.cid); tgWa.mode = t.dataset.wamode; tgWa.pick = waPilihAwal(g, tgWa.mode); tgWa.edited = false; keepScroll(renderTagihan); }
+  if (t.dataset.wareset && tgWa) { tgWa.edited = false; keepScroll(renderTagihan); }
+  if (t.dataset.wacancel) { tgWa = null; keepScroll(renderTagihan); }
+  if (t.dataset.wasend) waKirim();
+  if (t.dataset.wacopy) waSalin();
   if (t.dataset.pverify) { t.disabled = true; verifikasiBayar(t.dataset.pverify); }
   if (t.dataset.preject) {
     const box = document.querySelector(`[data-pbox="${t.dataset.preject}"]`);
@@ -1333,6 +1582,11 @@ document.addEventListener('click', e => {
 });
 
 document.addEventListener('input', e => {
+  if (annEdit && e.target.id === 'annPesan') { annEdit.pesan = e.target.value; return; }
+  if (annEdit && e.target.id === 'annJudul') { annEdit.judul = e.target.value; return; }
+  if (annEdit && e.target.id === 'annQ') { annEdit.q = e.target.value; const pos = e.target.selectionStart; keepScroll(renderPengumuman); const q2 = $('#annQ'); q2.focus(); q2.setSelectionRange(pos, pos); return; }
+  if (tgWa && e.target.id === 'waText') { tgWa.text = e.target.value; tgWa.edited = true; return; }
+  if (tgWa && e.target.id === 'waNo') { tgWa.no = e.target.value; return; }
   if (tgForm && e.target.dataset.pfamt) { if (e.target.value.trim() !== '') tgForm.pick[e.target.dataset.pfamt] = e.target.value.replace(/\D/g, ''); const ck = document.querySelector(`[data-pfck="${e.target.dataset.pfamt}"]`); if (ck && e.target.value.trim()) ck.checked = true; tgUpdTotal(); }
   if (form && e.target.dataset.q) setFormQty(e.target.dataset.q, e.target.value);
   if (shipForm && e.target.dataset.sq) setShipQty(e.target.dataset.sq, e.target.value);
@@ -1343,6 +1597,8 @@ document.addEventListener('change', e => {
   if (d.po) { e.target.checked ? prodPick.add(d.po) : prodPick.delete(d.po); return keepScroll(renderProduksi); }
   if (d.poall !== undefined) { d.poall.split(',').filter(Boolean).forEach(id => e.target.checked ? prodPick.add(id) : prodPick.delete(id)); return keepScroll(renderProduksi); }
   if (d.sp) { e.target.checked ? shipPick.add(d.sp) : shipPick.delete(d.sp); return keepScroll(renderPengiriman); }
+  if (annEdit && d.annck) { e.target.checked ? annEdit.pick.add(d.annck) : annEdit.pick.delete(d.annck); return keepScroll(renderPengumuman); }
+  if (tgWa && d.wack) { e.target.checked ? tgWa.pick[d.wack] = true : delete tgWa.pick[d.wack]; tgWa.mode = ''; return keepScroll(renderTagihan); }
   if (tgForm && d.pfck) {
     const g = tgInv.piutang.find(x => x.customerId === tgForm.cid), v = g && g.invoices.find(x => x.id === d.pfck);
     if (e.target.checked) tgForm.pick[d.pfck] = (document.querySelector(`[data-pfamt="${d.pfck}"]`).value.replace(/\D/g, '')) || String(v ? v.sisa : ''); else delete tgForm.pick[d.pfck];
